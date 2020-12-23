@@ -4,6 +4,15 @@ GREEN = 2
 RED = 3
 BLACK = 4
 GOLD = 5
+TAKEONEGOLD = [0,0,0,0,0,1]
+
+BUILD = 0
+RESERVE = 1
+TAKE2 = 2
+TAKE3 = 3
+
+MAX_NB_TOKENS = 10
+VP_GOAL = 15
 
 def strColor(color):
     colors = {
