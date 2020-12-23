@@ -5,6 +5,17 @@ RED = 3
 BLACK = 4
 GOLD = 5
 
+def strColor(color):
+    colors = {
+        0: "white",
+        1: "blue",
+        2: "green",
+        3: "red",
+        4: "black",
+        5: "gold"
+    }
+    return colors.get(color, "invalid color")
+
 # one card : victory points, bonus, cost, lvl
 DECK1 = [
     [0, 0, [0,2,0,0,2], 1],
