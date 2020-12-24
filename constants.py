@@ -34,7 +34,24 @@ class bcolors:
     RED ='\u001b[31m'
     BLACK ='\u001b[30m'
     YELLOW ='\u001b[33m'
-    
+
+
+def getColor(color):
+    if color == WHITE:
+        return bcolors.WHITE
+    elif color == BLUE:
+        return bcolors.BLUE
+    elif color == GREEN:
+        return bcolors.GREEN
+    elif color == RED:
+        return bcolors.RED
+    elif color == BLACK:
+        return bcolors.BLACK
+    elif color == GOLD:
+        return bcolors.YELLOW
+    else:
+        return bcolors.RESET
+
 # one card : victory points, bonus, cost, lvl
 DECK1 = [
     [0, 0, [0,2,0,0,2], 1],

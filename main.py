@@ -30,7 +30,7 @@ class Board:
         print("tour n" + str(self.nbTurn))
         print()
         # tokens from board
-        print(f"{bcolors.WHITE}{self.tokens[WHITE]} {bcolors.BLUE}{self.tokens[BLUE]} {bcolors.GREEN}{self.tokens[GREEN]} {bcolors.RED}{self.tokens[RED]} {bcolors.BLACK}{self.tokens[BLACK]} {bcolors.YELLOW}{self.tokens[GOLD]}{bcolors.RESET}")
+        print(' '.join(self.getShowTokens()) + bcolors.RESET)
         # cards
         for lvl in range(0,3):
             cards = ""
@@ -48,11 +48,14 @@ class Board:
             output = ""
             if i == self.currentPlayer:
                 output += f"{bcolors.BOLD}-> "
-            output += player.getShow()
+            output += player.getShow() + bcolors.RESET
             print(output)
         # current player
         print("\nreserved cards of current player: " + player.showReserved())
         
+    def getShowTokens(self):
+        return [f"{getColor(color)}{qtt}" for color, qtt in enumerate(self.tokens)]
+    
     def getNbMaxTokens(self, nbPlayer):
        if nbPlayer == 2:
            return 4
@@ -130,6 +133,8 @@ class Board:
 
     def take2tokens(self, player):
         listToken = player.ask2tokens(self)
+        if listToken == None:
+            return False
         if (sum(listToken) != 2):
             print("that's not 2 tokens sir! Put them down")
             return False
@@ -153,9 +158,13 @@ class Board:
             
 
     def removeCard(self, card):
-        self.displayedCards[card.lvl - 1].remove(card)
-        if len(self.decks[card.lvl - 1]) > 0:
-            self.displayedCards[card.lvl - 1].append(self.decks[card.lvl - 1].pop(0))
+        visibles = flatten(self.displayedCard)
+        if card in visible:
+            self.displayedCards[card.lvl - 1].remove(card)
+            if len(self.decks[card.lvl - 1]) > 0:
+                self.displayedCards[card.lvl - 1].append(self.decks[card.lvl - 1].pop(0))
+        else:
+            self.decks[card.lvl - 1].remove(card)
     
     def build(self, player):
         card = player.askBuild(self)
