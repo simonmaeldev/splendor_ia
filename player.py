@@ -14,7 +14,7 @@ class Player:
 
     def getShow(self):
         bonus = self.getTotalBonus()
-        tokens = self.getShowTokens(self)
+        tokens = self.getShowTokens()
         return f"{self.name} vp:{self.getVictoryPoints()} reserved:{len(self.reserved)} tokens:{' '.join(tokens)}"
 
     def show(self):
