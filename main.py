@@ -17,15 +17,28 @@ class Board:
         self.characters = [Character(c[0], c[1]) for c in CHARACTERS]
         shuffle(self.characters)
         self.characters = self.characters[:nbPlayer + 1]
-        self.lvl1 = [self.deckLVL1.pop(0) for i in range(0,4)]
-        self.lvl2 = [self.deckLVL2.pop(0) for i in range(0,4)]
-        self.lvl3 = [self.deckLVL3.pop(0) for i in range(0,4)]
-        self.displayedCards [[self.deckLVL1.pop(0) for i in range(0,4)], [self.deckLVL2.pop(0) for i in range(0,4)], [self.deckLVL3.pop(0) for i in range(0,4)]]
+        self.displayedCards = [[self.deckLVL1.pop(0) for i in range(0,4)], [self.deckLVL2.pop(0) for i in range(0,4)], [self.deckLVL3.pop(0) for i in range(0,4)]]
         self.players = [Player(i) for i in range(1,nbPlayer + 1)]
-        self.endGame = false
+        self.endGame = False
         self.currentPlayer = 0
         self.nbTurn = 1
 
+    def show(self):
+        print("tour n" + str(self.nbTurn))
+        print(f"{bcolors.WHITE}{self.tokens[WHITE]} {bcolors.BLUE}{self.tokens[BLUE]} {bcolors.GREEN}{self.tokens[GREEN]} {bcolors.RED}{self.tokens[RED]} {bcolors.BLACK}{self.tokens[BLACK]} {bcolors.YELLOW}{self.tokens[GOLD]}{bcolors.RESET}")
+        for lvl in range(0,3):
+            cards = ""
+            for card in self.displayedCards[lvl]:
+                cards += "|" + card.getShow() + "|"
+            print(f"lvl{lvl+1} : " + cards + f" ({len(self.decks[lvl])})")
+        for i, player in enumerate(self.players):
+            output = ""
+            if i == self.currentPlayer:
+                output += f"{bcolors.BOLD}-> "
+            output += player.getShow()
+            print(output)
+        print("reserved cards of current player: " + player.showReserved())
+        
     def getNbMaxTokens(self, nbPlayer):
        if nbPlayer == 2:
            return 4
@@ -34,8 +47,8 @@ class Board:
        else : return 7
 
     def turn(self, player):
-        res = true
-        while !res:
+        res = True
+        while not res:
             action = player.askAction(self)
             if action == BUILD:
                 res = self.build(player)
@@ -46,10 +59,10 @@ class Board:
             elif action == TAKE3:
                 res = self.take3tokens(player)
             else:
-                res = false
+                res = False
 
         # while the player got to many tokens, remove them
-        while true:
+        while True:
             if player.gotToManyTokens():
                 self.takeOneTokenFromPlayer(player)
             else:
@@ -58,7 +71,7 @@ class Board:
         self.checkEndGame(player)
         
     def play(self):
-        while true:
+        while True:
             self.turn(self.players[self.currentPlayer])
             self.currentPlayer += 1
             if self.currentPlayer >= len(self.players):
@@ -87,17 +100,17 @@ class Board:
 
     def checkEndGame(self, player):
        if player.getVictoryPoints >= VP_GOAL:
-           self.endGame = true
+           self.endGame = True
    
     def take3tokens(self, player):
         listToken = player.ask3tokens(self)
         if (sum(listToken) > 3):
             print("that's more than 3 tokens sir! put them down")
-            return false
+            return False
         result = substract(self.tokens, listToken)
-        if any r < 0 for r in result:
+        if any (r < 0 for r in result):
             print("there's not enough token for that")
-            return false
+            return False
         else:
             return self.takeTokens(player, listToken)
 
@@ -105,17 +118,17 @@ class Board:
         listToken = player.ask2tokens(self)
         if (sum(listToken) != 2):
             print("that's not 2 tokens sir! Put them down")
-            return false
+            return False
         colorWanted = listToken.index(2)
         if self.tokens[colorWanted] < 4:
             print("there's no 4 tokens of more from the color " + strColor(colorWanted) + " you can't take 2 tokens from this color")
-            return false
+            return False
         else :
             return self.takeTokens(player,listToken)
 
-    # return true if there was enough tokens to take
+    # return True if there was enough tokens to take
     def takeTokens(self, player, listToken):
-        enoughTokens = true
+        enoughTokens = True
         for color in range(0,6):
             while listToken[color] > 0 and self.tokens[color] > 0:
                 player.tokens[color] += 1
@@ -141,19 +154,19 @@ class Board:
             else :
                 self.removeCard(card)
             player.built.append(card)
-            return true
+            return True
         else :
-            return false
+            return False
         
     def reserve(self, player):
         if len(player.reserved) >= 3:
-            return false
+            return False
         else :
             card = player.askReserve(self)
             self.removeCard(card)
             player.reserve.append(card)
             self.takeTokens(player, TAKEONEGOLD)
-            return true
+            return True
         
 class Card:
     def __init__(self, victoryPoints, bonus, cost, lvl):
@@ -162,6 +175,13 @@ class Card:
         self.cost = cost
         self.lvl = lvl
 
+    def show(self):
+        print(f"{self.vp} {strColor(self.bonus)} [{bcolors.WHITE}{self.cost[WHITE]} {bcolors.BLUE}{self.cost[BLUE]} {bcolors.GREEN}{self.cost[GREEN]} {bcolors.RED}{self.cost[RED]} {bcolors.BLACK}{self.cost[BLACK]}{bcolors.RESET}]")
+
+    def getShow(self):
+        return f"{self.vp} {strColor(self.bonus)} [{bcolors.WHITE}{self.cost[WHITE]} {bcolors.BLUE}{self.cost[BLUE]} {bcolors.GREEN}{self.cost[GREEN]} {bcolors.RED}{self.cost[RED]} {bcolors.BLACK}{self.cost[BLACK]}{bcolors.RESET}]"
+        
+        
     def __str__(self):
         return "vp: {}, color: {}, cost: {}, lvl{}".format(self.vp, strColor(self.bonus), [str(self.cost[i]) + strColor(i) for i in range(0,5)], self.lvl)
 
@@ -173,6 +193,20 @@ class Player:
         self.reserved = []
         self.characters = []
 
+    def getShow(self):
+        bonus = self.getTotalBonus()
+        return f"{self.name} vp:{self.getVictoryPoints()} reserved:{len(self.reserved)} tokens:{bcolors.WHITE}{self.tokens[WHITE]} {bcolors.BLUE}{self.tokens[BLUE]} {bcolors.GREEN}{self.tokens[GREEN]} {bcolors.RED}{self.tokens[RED]} {bcolors.BLACK}{self.tokens[BLACK]} {bcolors.YELLOW}{self.tokens[GOLD]}{bcolors.RESET} bonus:[{bcolors.WHITE}{bonus[WHITE]} {bcolors.BLUE}{bonus[BLUE]} {bcolors.GREEN}{bonus[GREEN]} {bcolors.RED}{bonus[RED]} {bcolors.BLACK}{bonus[BLACK]}{bcolors.RESET}]"
+
+    def show(self):
+        bonus = self.getTotalBonus()
+        print(f"{self.name} vp:{self.getVictoryPoints()} reserved:{len(self.reserved)} tokens:{bcolors.WHITE}{self.tokens[WHITE]} {bcolors.BLUE}{self.tokens[BLUE]} {bcolors.GREEN}{self.tokens[GREEN]} {bcolors.RED}{self.tokens[RED]} {bcolors.BLACK}{self.tokens[BLACK]} {bcolors.YELLOW}{self.tokens[GOLD]}{bcolors.RESET} bonus:[{bcolors.WHITE}{bonus[WHITE]} {bcolors.BLUE}{bonus[BLUE]} {bcolors.GREEN}{bonus[GREEN]} {bcolors.RED}{bonus[RED]} {bcolors.BLACK}{bonus[BLACK]}{bcolors.RESET}]")
+        
+    def showReserved(self):
+        cards = "" if (len(self.reserved) > 0) else "none"
+        for c in self.reserved:
+            cards += "|" + c.getShow() + "|"
+        return cards
+    
     def askAction(self, board):
         return null
     
@@ -232,3 +266,6 @@ class Character:
 
     def __str__(self):
         return "vp: {}, cost: {}".format(self.vp, [str(self.cost[i]) + strColor(i) for i in range(0,5)])
+
+b = Board(4)
+b.show()

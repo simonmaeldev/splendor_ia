@@ -25,6 +25,16 @@ def strColor(color):
     }
     return colors.get(color, "invalid color")
 
+class bcolors:
+    BOLD = '\033[1m'
+    RESET = '\u001b[0m'
+    WHITE = '\u001b[37m'
+    BLUE ='\u001b[34m'
+    GREEN ='\u001b[32m'
+    RED ='\u001b[31m'
+    BLACK ='\u001b[30m'
+    YELLOW ='\u001b[33m'
+    
 # one card : victory points, bonus, cost, lvl
 DECK1 = [
     [0, 0, [0,2,0,0,2], 1],
