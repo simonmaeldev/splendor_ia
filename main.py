@@ -28,19 +28,30 @@ class Board:
 
     def show(self):
         print("tour n" + str(self.nbTurn))
+        print()
+        # tokens from board
         print(f"{bcolors.WHITE}{self.tokens[WHITE]} {bcolors.BLUE}{self.tokens[BLUE]} {bcolors.GREEN}{self.tokens[GREEN]} {bcolors.RED}{self.tokens[RED]} {bcolors.BLACK}{self.tokens[BLACK]} {bcolors.YELLOW}{self.tokens[GOLD]}{bcolors.RESET}")
+        # cards
         for lvl in range(0,3):
             cards = ""
             for card in self.displayedCards[lvl]:
                 cards += "|" + card.getShow() + "|"
             print(f"lvl{lvl+1} : " + cards + f" ({len(self.decks[lvl])})")
+        # characters
+        chars = ""
+        for c in self.characters:
+            chars += "|" + c.getShow() + "|"
+        print("nobles:"+chars)
+        print()
+        # players
         for i, player in enumerate(self.players):
             output = ""
             if i == self.currentPlayer:
                 output += f"{bcolors.BOLD}-> "
             output += player.getShow()
             print(output)
-        print("reserved cards of current player: " + player.showReserved())
+        # current player
+        print("\nreserved cards of current player: " + player.showReserved())
         
     def getNbMaxTokens(self, nbPlayer):
        if nbPlayer == 2:
