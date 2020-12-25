@@ -9,13 +9,16 @@ class Player:
         self.reserved = []
         self.characters = []
 
+    def getShowBonus(self):
+        return [f"{getColor(color)}{qtt}" for color, qtt in enumerate(self.getTotalBonus())]
+    
     def getShowTokens(self):
         return [f"{getColor(color)}{qtt}" for color, qtt in enumerate(self.tokens)]
 
     def getShow(self):
         bonus = self.getTotalBonus()
         tokens = self.getShowTokens()
-        return f"{self.name} vp:{self.getVictoryPoints()} reserved:{len(self.reserved)} tokens:{' '.join(tokens)}"
+        return f"{self.name} vp:{self.getVictoryPoints()} reserved:{len(self.reserved)} tokens:{' '.join(tokens)}{bcolors.RESET} bonus:[{' '.join(self.getShowBonus())}]"
 
     def show(self):
         print(self.getShow())
@@ -37,8 +40,8 @@ class Player:
         valide = False
         while not valide:
             print("place an x under the colors you want, space if you don't want it")
-            print(''.join(board.getShowTokens()[:5]) + bcolor.RESET)
-            choice = input()
+            print(''.join(board.getShowTokens()[:5]) + bcolors.RESET)
+            choice = input() + "      "
             choice = choice[:5]
             nbSelected = choice.count('x')
             nbPossible = 5 - board.tokens[:5].count(0)
@@ -52,8 +55,8 @@ class Player:
             return None
         while not valide:
             print("place an x under the color you want to take 2 tokens, space for the others")
-            print(''.join(board.getShowTokens()[:5]) + bcolor.RESET)
-            choice = input()
+            print(''.join(board.getShowTokens()[:5]) + bcolors.RESET)
+            choice = input() + "      "
             choice = choice[:5]
             nbSelected = choice.count('x')
             valide = nbSelected == 1 and board.tokens[choice.index('x')] >= 4
@@ -83,15 +86,15 @@ class Player:
     def askTokenToRemove(self, board):
         valide = False
         while not valide:
-            print("place an x under the colors you want, space if you don't want it")
-            print(''.join(board.getShowTokens()) + bcolor.RESET)
-            choice = input()
+            print("you have too many tokens. Please place an x under the color of your choice, we will take one token from this color")
+            print(''.join(self.getShowTokens()) + bcolors.RESET)
+            choice = input() + "      "
             choice = choice[:6]
             valide = choice.count('x') == 1 and self.tokens[choice.index('x')] > 0
         return choice.index('x')
     
     def takeCharacter(self, board):
-        possible = filter(lambda c: all(color >=0 for color in substract(self.getTotalBonus(), c.cost)), board.characters)
+        possible = list(filter(lambda c: all(color >=0 for color in substract(self.getTotalBonus(), c.cost)), board.characters))
         if possible:
             c = None
             if len(possible) == 1:
@@ -126,7 +129,7 @@ class Player:
     def convertToGold(self, cost):
         maxPlayer = [min(p,c) for p,c in zip(self.tokens, cost)]
         goldNeeded = sum(cost) - sum(maxPlayer)
-        maxPlayer[GOLD] = goldNeeded
+        maxPlayer += [goldNeeded]
         return maxPlayer
 
     def realGoldCost(self,card):
@@ -135,7 +138,7 @@ class Player:
     
     def canBuild(self, card):
         cost = self.realGoldCost(card)
-        return self.token[GOLD] >= cost[GOLD]
+        return self.tokens[GOLD] >= cost[GOLD]
         
     def gotToManyTokens(self):
         return sum(self.tokens) > MAX_NB_TOKENS

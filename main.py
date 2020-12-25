@@ -21,7 +21,7 @@ class Board:
         shuffle(self.characters)
         self.characters = self.characters[:nbPlayer + 1]
         self.displayedCards = [[self.deckLVL1.pop(0) for i in range(0,4)], [self.deckLVL2.pop(0) for i in range(0,4)], [self.deckLVL3.pop(0) for i in range(0,4)]]
-        self.players = [Player(i) for i in range(1,nbPlayer + 1)]
+        self.players = [Player(str(i)) for i in range(1,nbPlayer + 1)]
         self.endGame = False
         self.currentPlayer = 0
         self.nbTurn = 1
@@ -51,7 +51,10 @@ class Board:
             output += player.getShow() + bcolors.RESET
             print(output)
         # current player
-        print("\nreserved cards of current player: " + player.showReserved())
+        print("\nreserved cards of current player: " + self.getCurrentPlayer().showReserved())
+
+    def getCurrentPlayer(self):
+        return self.players[self.currentPlayer]
         
     def getShowTokens(self):
         return [f"{getColor(color)}{qtt}" for color, qtt in enumerate(self.tokens)]
@@ -64,7 +67,9 @@ class Board:
        else : return 7
 
     def turn(self, player):
-        res = True
+        print("==========================")
+        self.show()
+        res = False
         while not res:
             action = player.askAction(self)
             if action == BUILD:
@@ -96,15 +101,16 @@ class Board:
                     break
                 else:
                     self.currentPlayer = 0
-                    self.turn += 1
+                    self.nbTurn += 1
         self.printVictorious()
 
     def printVictorious(self):
-        vp = [player.getVitctoryPoints() for player in self.players]
-        indices = [i for i, p in enumerate(my_list) if p == map(vp)]
+        vp = [player.getVictoryPoints() for player in self.players]
+        indices = [i for i, p in enumerate(vp) if p >= VP_GOAL]
         if len(indices) == 1:
             winner = indices[0]
         else:
+            print("some players have the same amout of victory points. the winner is the one with less cards")
             nbCard = [len(self.players[i].built) for i in indices]
             winner = indices[nbCard.index(min(nbCard))]
         print("player " + self.players[winner].name + " won")
@@ -116,7 +122,8 @@ class Board:
         self.tokens[color] += 1
 
     def checkEndGame(self, player):
-       if player.getVictoryPoints >= VP_GOAL:
+       if player.getVictoryPoints() >= VP_GOAL:
+           print(f"{bcolors.RED + bcolors.BOLD}WARNING it's the last turn ! {bcolors.RESET}")
            self.endGame = True
    
     def take3tokens(self, player):
@@ -158,8 +165,8 @@ class Board:
             
 
     def removeCard(self, card):
-        visibles = flatten(self.displayedCard)
-        if card in visible:
+        visibles = flatten(self.displayedCards)
+        if card in visibles:
             self.displayedCards[card.lvl - 1].remove(card)
             if len(self.decks[card.lvl - 1]) > 0:
                 self.displayedCards[card.lvl - 1].append(self.decks[card.lvl - 1].pop(0))
@@ -171,7 +178,7 @@ class Board:
         if player.canBuild(card):
             rgc = player.realGoldCost(card)
             player.tokens = substract(player.tokens, rgc)
-            self.token = add(self.tokens, rgc)
+            self.tokens = add(self.tokens, rgc)
             if card in player.reserved:
                 player.reserved.remove(card)
             else :
@@ -179,6 +186,7 @@ class Board:
             player.built.append(card)
             return True
         else :
+            print("you can't build that at the moment, sorry")
             return False
         
     def reserve(self, player):
@@ -187,9 +195,9 @@ class Board:
         else :
             card = player.askReserve(self)
             self.removeCard(card)
-            player.reserve.append(card)
-            self.takeTokens(player, TAKEONEGOLD)
+            player.reserved.append(card)
+            self.takeTokens(player, TAKEONEGOLD.copy())
             return True
         
-b = Board(4)
-b.show()
+b = Board(2)
+b.play()
