@@ -84,11 +84,8 @@ class Board:
                 res = False
 
         # while the player got to many tokens, remove them
-        while True:
-            if player.gotToManyTokens():
-                self.takeOneTokenFromPlayer(player)
-            else:
-                break
+        while player.gotToManyTokens():
+            self.takeOneTokenFromPlayer(player)
         player.takeCharacter(self)
         self.checkEndGame(player)
         
@@ -106,7 +103,7 @@ class Board:
 
     def printVictorious(self):
         vp = [player.getVictoryPoints() for player in self.players]
-        indices = [i for i, p in enumerate(vp) if p >= VP_GOAL]
+        indices = [i for i, p in enumerate(vp) if p == max(vp)]
         if len(indices) == 1:
             winner = indices[0]
         else:
@@ -118,7 +115,10 @@ class Board:
 
     def takeOneTokenFromPlayer(self, player):
         color = player.askTokenToRemove(self)
-        player.tokens[color] -= 1
+        if player.tokens[color] > 0:
+            player.tokens[color] -= 1
+        else:
+            return False
         self.tokens[color] += 1
 
     def checkEndGame(self, player):
