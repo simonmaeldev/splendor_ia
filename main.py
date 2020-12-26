@@ -6,7 +6,7 @@ from characters import *
 from cards import *
 
 class Board:
-    def __init__(self, nbPlayer):
+    def __init__(self, nbPlayer, IA):
         self.deckLVL1 = [Card(c[0], c[1], c[2], c[3]) for c in DECK1]
         shuffle(self.deckLVL1)
         self.deckLVL2 = [Card(c[0], c[1], c[2], c[3]) for c in DECK2]
@@ -21,7 +21,7 @@ class Board:
         shuffle(self.characters)
         self.characters = self.characters[:nbPlayer + 1]
         self.displayedCards = [[self.deckLVL1.pop(0) for i in range(0,4)], [self.deckLVL2.pop(0) for i in range(0,4)], [self.deckLVL3.pop(0) for i in range(0,4)]]
-        self.players = [Player(str(i)) for i in range(1,nbPlayer + 1)]
+        self.players = [Player(str(i + 1), IA[i]) for i in range(0,nbPlayer)]
         self.endGame = False
         self.currentPlayer = 0
         self.nbTurn = 1
@@ -199,5 +199,5 @@ class Board:
             self.takeTokens(player, TAKEONEGOLD.copy())
             return True
         
-b = Board(2)
+b = Board(2, [None, None])
 b.play()
