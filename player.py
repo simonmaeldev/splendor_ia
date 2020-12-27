@@ -12,9 +12,18 @@ class Player:
         # action : [type, card/tokenList, character/tokens to remove if too much]
         self.action = []
 
-    def isHuman():
+    def isHuman(self):
         return self.IA == None
 
+    def haveUnseenCards(self):
+        return not all(c.isVisible() for c in self.reserved)
+
+    def getUnseenCards(self):
+        return list(filter(lambda card : not card.isVisible(), self.reserved))
+
+    def removeUnseedCards(self):
+        self.reserved = [card for card in self.reserved if card not in self.getUnseenCards()]
+        
     def getShowBonus(self):
         return [f"{getColor(color)}{qtt}" for color, qtt in enumerate(self.getTotalBonus())]
     
@@ -127,27 +136,6 @@ class Player:
             willRemove[color] -= 1
             return color
     
-    def takeCharacter(self, board):
-        possible = list(filter(lambda c: all(color >=0 for color in substract(self.getTotalBonus(), c.cost)), board.characters))
-        if possible:
-            c = None
-            if len(possible) == 1:
-                c = possible[0]
-            else:
-                if self.isHuman():
-                    print("you can have multiple noble this turn. which one do you want?")
-                    for i, character in enumerate(possible):
-                        print(str(i) + ": "+ character.getShow())
-                    valide = False
-                    while not valide:
-                        choice = int(input())
-                        valide = choice in range(0, len(possible))
-                    c = possible[choice]
-                else:
-                    c = self.getComplementaryAction()
-            self.characters.append(c)
-            board.characters.remove(c)
-    
     def getVictoryPoints(self):
         return sum([card.vp for card in self.built]) + sum([c.vp for c in self.characters])
         
@@ -177,3 +165,9 @@ class Player:
         
     def gotToManyTokens(self):
         return sum(self.tokens) > MAX_NB_TOKENS
+
+    def getAllVisible(self, board):
+        return board.displayedCards + [self.reserved]
+
+    def canReserve(self):
+        return len(self.reserved) < MAX_RESERVE

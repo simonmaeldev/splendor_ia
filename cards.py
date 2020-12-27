@@ -6,6 +6,13 @@ class Card:
         self.bonus = bonus
         self.cost = cost
         self.lvl = lvl
+        self.visible = False
+
+    def isVisible(self):
+        return self.visible
+
+    def setVisible(self):
+        self.visible = True
 
     def show(self):
         print(f"{self.vp} {strColor(self.bonus)} [{bcolors.WHITE}{self.cost[WHITE]} {bcolors.BLUE}{self.cost[BLUE]} {bcolors.GREEN}{self.cost[GREEN]} {bcolors.RED}{self.cost[RED]} {bcolors.BLACK}{self.cost[BLACK]}{bcolors.RESET}]")
