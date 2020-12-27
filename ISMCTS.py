@@ -14,7 +14,7 @@ def ISMCTS(rootstate, itermax, verbose = False):
     rootnode = Node()
 
     for i in range(itermax):
-        print(f"{i}/{itermax}")
+        if i%100 == 0: print(f"{i}/{itermax}")
         node = rootnode
 
         # Determinize
@@ -34,6 +34,7 @@ def ISMCTS(rootstate, itermax, verbose = False):
             node = node.addChild(m, player) # add child and descend tree
 
         # Simulate
+        # print("simulate")
         while state.getMoves() != []: # while state is non-terminal
             state.doMove(random.choice(state.getMoves()))
 

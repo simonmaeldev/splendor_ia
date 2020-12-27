@@ -124,6 +124,13 @@ class Board:
         movesBuild = self.makeMovesBuild(allBuild)
         allReserve = self.getPossibleReserve()
         movesReserve = self.makeMovesReserve(allReserve)
+        t = len(movesTokens)
+        b = len(movesBuild)
+        r = len(movesReserve)
+        total = t + b + r
+        # print(f"{t} {b} {r} {self.getCurrentPlayer().tokens} {sum(self.getCurrentPlayer().tokens)}")
+        if sum(self.getCurrentPlayer().tokens) >= MAX_NB_TOKENS and movesBuild:
+            movesTokens = []
         return movesTokens + movesBuild + movesReserve
 
     def getPossibleTokens(self):
@@ -136,7 +143,7 @@ class Board:
         all2 = set(permutations([2,0,0,0,0]))
         allComb3 = list(all3_3) + list(all3_2) + list(all3_1)
         # check validity of each combination
-        valideComb3 = list(filter((lambda tokens: (all(t >= 0) for t in tokens)), map(lambda comb: substract(self.tokens, list(comb) + [0]), allComb3)))
+        valideComb3 = list(filter((lambda tokens: (all(t >= 0 for t in substract(self.tokens, tokens)))), map((lambda comb: list(comb) + [0]) ,allComb3)))
         valideComb2 = [comb + [0] for comb in map(list, all2) if self.tokens[comb.index(2)] >= NB_MINI_TOKEN_TAKE_2]
         return valideComb3 + valideComb2
         
@@ -157,7 +164,11 @@ class Board:
                 else:
                     tokensGiveAway = list(set(permutations([1,1,1,0,0,0]))) + list(set(permutations([2,1,0,0,0,0]))) + list(set(permutations([3,0,0,0,0,0])))
                 # check validity for each combination
-                tokensGiveAway = list(filter((lambda tokens: (all(t >= 0) for t in tokens)), map(lambda comb: substract(self.getCurrentPlayer().tokens, list(comb)), tokensGiveAway)))
+                tokensGiveAway = list(map(list, tokensGiveAway))
+                tokensGiveAway = list(filter((lambda lt: all(t >= 0 for t in substract(tokensPlayerAfter, lt))), tokensGiveAway))
+                #print(tokensGiveAway)
+                #print(tokensPlayerAfter)
+                #raise Exception("stop")
             moves += [Move(TOKENS, comb, tga, None) for tga in tokensGiveAway] if tokensGiveAway else [Move(TOKENS, comb, NO_TOKENS, None)]
         return moves
 
@@ -204,7 +215,10 @@ class Board:
     def makeMovesReserve(self, allReserve):
         """ create all moves possibles when choosing to  reserve
         """
-        toRemove = [list(perm) for perm in set(permutations([1,0,0,0,0,0]))] if sum(self.getCurrentPlayer().tokens) == MAX_NB_TOKENS and self.tokens[GOLD] else []
+        tokensGiveAway = list(map(list, set(permutations([1,0,0,0,0,0]))))
+        tokensGiveAway = list(filter((lambda lt: all(t >= 0 for t in substract(self.getCurrentPlayer().tokens, lt))), tokensGiveAway))
+
+        toRemove = tokensGiveAway if sum(self.getCurrentPlayer().tokens) == MAX_NB_TOKENS and self.tokens[GOLD] else []
         moves = []
         for reserve in allReserve:
             if toRemove:
@@ -229,7 +243,7 @@ class Board:
     def getResult(self, player):
         """ return 1 if the player is the one who won this game, 0 otherwise
         """
-        print(f"get result, turn n{self.nbTurn}")
+        # print(f"get result, turn n{self.nbTurn}")
         return 1 if player == self.players[self.getVictorious()] else 0
 
     def checkEndGame(self, verbose = False):
@@ -268,11 +282,19 @@ class Board:
         player = self.getCurrentPlayer()
         player.tokens = add(player.tokens, move.action)
         self.tokens = substract(self.tokens, move.action)
+        if any(t < 0 for t in self.tokens):
+            print(move)
+            print(self.tokens)
+            raise Exception("negatif tokens")
 
     def removeTooManyTokens(self, move):
         player = self.getCurrentPlayer()
         player.tokens = substract(player.tokens, move.tokensToRemove)
         self.tokens = add(self.tokens, move.tokensToRemove)
+        if any(t < 0 for t in player.tokens):
+            print(move)
+            print(player.tokens)
+            raise Exception("negatif tokens")
 
     def takeCharacter(self, move):
         if move.character:

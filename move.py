@@ -7,3 +7,6 @@ class Move:
         self.action = action # if build or reserve : [[lvl][pos]], if take tokens : list of tokens
         self.tokensToRemove = tokensToRemove # tokens the player will remove at the end of his turn if he have too many of them
         self.character = characterSelected # the noble the player will take if he can take one
+
+    def __repr__(self):
+        return f"[{self.actionType} {self.action} {self.tokensToRemove} {self.character}]"

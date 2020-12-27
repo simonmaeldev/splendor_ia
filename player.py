@@ -21,7 +21,7 @@ class Player:
     def getUnseenCards(self):
         return list(filter(lambda card : not card.isVisible(), self.reserved))
 
-    def removeUnseedCards(self):
+    def removeUnseenCards(self):
         self.reserved = [card for card in self.reserved if card not in self.getUnseenCards()]
         
     def getShowBonus(self):

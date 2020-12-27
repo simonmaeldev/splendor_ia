@@ -10,7 +10,7 @@ def PlayGame():
         state.show()
         # Use different numbers of iterations (simulations, tree nodes) for different players
         if state.currentPlayer == 0:
-                m = ISMCTS(rootstate = state, itermax = 1000, verbose = False)
+                m = ISMCTS(rootstate = state, itermax = 2000, verbose = False)
         else:
                 m = ISMCTS(rootstate = state, itermax = 100, verbose = False)
         print ("Best Move: " + str(m) + "\n")
