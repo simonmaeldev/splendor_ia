@@ -13,3 +13,9 @@ class Character:
     
     def getShow(self):
         return f"{self.vp} [{bcolors.WHITE}{self.cost[WHITE]} {bcolors.BLUE}{self.cost[BLUE]} {bcolors.GREEN}{self.cost[GREEN]} {bcolors.RED}{self.cost[RED]} {bcolors.BLACK}{self.cost[BLACK]}{bcolors.RESET}]"
+
+    def __eq__(self, other):
+        return other != None and self.vp == other.vp and self.cost == other.cost
+
+    def __ne__(self, other):
+        return not self.__eq__(other)

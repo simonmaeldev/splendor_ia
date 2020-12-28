@@ -94,7 +94,7 @@ class Board:
         self.currentPlayer = (self.currentPlayer + 1) % len(self.players)
         if self.currentPlayer == 0 and not self.endGame:
             self.nbTurn += 1
-        elif self.endGame:
+        if self.endGame and self.currentPlayer == 0:
             self.isFinish = True
 
     def doMove(self, move):
@@ -176,11 +176,11 @@ class Board:
         """ return position of all cards the player can build
         """
         player = self.getCurrentPlayer()
-        allVisible = self.displayedCards + [player.reserved]
+        allVisible = player.getAllVisible(self)
         build = []
-        for i in range(0,4):
+        for i in range(0,len(allVisible)):
             for j in range(0, len(allVisible[i])):
-                if player.canBuild(allVisible[i][j]):
+                if player.canBuild((i,j), self):
                     build.append((i,j))
         return build
 
@@ -203,13 +203,13 @@ class Board:
         """
         reserve = []
         if self.getCurrentPlayer().canReserve():
-            for i in range(0,3):
+            for i in range(0,len(self.displayedCards)):
                 # add visible cards
-                for j in range(0, len(self.displayedCards)):
+                for j in range(0, len(self.displayedCards[i])):
                     reserve.append((i,j))
                 # if there's still a deck of this lvl
                 if self.decks[i]:
-                    reserve.append((i,4))
+                    reserve.append((i,TOP_DECK))
         return reserve
         
     def makeMovesReserve(self, allReserve):
@@ -253,10 +253,11 @@ class Board:
            self.endGame = True
 
     def getCard(self, move):
-        if move.actionType == RESERVE and move.action[1] == 4:
-            return self.decks[move.action[0]].pop(0)
+        if move.actionType == RESERVE and move.action[1] == TOP_DECK: # reserve topdeck
+            return self.decks[move.action[0]][0]
         else:
-            return self.getCurrentPlayer().getAllVisible(self)[move.action[0]][move.action[1]]
+            visiblePlayer = self.getCurrentPlayer().getAllVisible(self)
+            return visiblePlayer[move.action[0]][move.action[1]]
         
     def build(self, move):
         """ current player build a card
@@ -270,11 +271,12 @@ class Board:
             player.reserved.remove(card)
             card.setVisible()
         else :
-            self.removeCard(card)
+            self.removeCard(move)
         player.built.append(card)
 
     def reserve(self, move):
         card = self.getCard(move)
+        self.removeCard(move)
         self.getCurrentPlayer().reserved.append(card)
         if self.tokens[GOLD]: self.takeTokens(Move(move.actionType, TAKEONEGOLD, move.tokensToRemove, move.character))
 
@@ -283,8 +285,6 @@ class Board:
         player.tokens = add(player.tokens, move.action)
         self.tokens = substract(self.tokens, move.action)
         if any(t < 0 for t in self.tokens):
-            print(move)
-            print(self.tokens)
             raise Exception("negatif tokens")
 
     def removeTooManyTokens(self, move):
@@ -292,8 +292,6 @@ class Board:
         player.tokens = substract(player.tokens, move.tokensToRemove)
         self.tokens = add(self.tokens, move.tokensToRemove)
         if any(t < 0 for t in player.tokens):
-            print(move)
-            print(player.tokens)
             raise Exception("negatif tokens")
 
     def takeCharacter(self, move):
@@ -301,14 +299,18 @@ class Board:
             self.getCurrentPlayer().characters.append(move.character)
             self.characters.remove(move.character)
    
-    def removeCard(self, card):
-        self.displayedCards[card.lvl - 1].remove(card)
-        if len(self.decks[card.lvl - 1]) > 0:
-            newCard = self.decks[card.lvl - 1].pop(0)
-            newCard.setVisible()
-            self.displayedCards[card.lvl - 1].append(newCard)
+    def removeCard(self, move):
+        if move.action[1] == TOP_DECK: #top deck
+            del self.decks[move.action[0]][0]
+        else:
+            del self.displayedCards[move.action[0]][move.action[1]]
+            if len(self.decks[move.action[0]]) > 0:
+                newCard = self.decks[move.action[0]].pop(0)
+                newCard.setVisible()
+                self.displayedCards[move.action[0]].append(newCard)
     
     def show(self):
+        print("===============================================================")
         print("tour n" + str(self.nbTurn))
         print()
         # tokens from board

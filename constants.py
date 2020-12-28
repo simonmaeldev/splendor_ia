@@ -19,6 +19,7 @@ MAX_NB_TOKENS = 10
 VP_GOAL = 15
 NB_MINI_TOKEN_TAKE_2 = 4
 MAX_RESERVE = 3
+TOP_DECK = 4
 
 def strColor(color):
     colors = {

@@ -12,6 +12,12 @@ class Player:
         # action : [type, card/tokenList, character/tokens to remove if too much]
         self.action = []
 
+    def __eq__(self, other):
+        return self.name == other.name and self.tokens == other.tokens and self.built == other.built and self.reserved == other.reserved and self.characters == other.characters and self.IA == other.IA
+
+    def __ne__(self, other):
+        return not self.__eq__(other)
+    
     def isHuman(self):
         return self.IA == None
 
@@ -159,7 +165,8 @@ class Player:
         rc = self.realCost(card)
         return self.convertToGold(rc)
     
-    def canBuild(self, card):
+    def canBuild(self, posCard, board):
+        card = self.getAllVisible(board)[posCard[0]][posCard[1]]
         cost = self.realGoldCost(card)
         return self.tokens[GOLD] >= cost[GOLD]
         

@@ -14,18 +14,20 @@ def ISMCTS(rootstate, itermax, verbose = False):
     rootnode = Node()
 
     for i in range(itermax):
-        if i%100 == 0: print(f"{i}/{itermax}")
+        #print(f"{i}/{itermax}")
         node = rootnode
 
         # Determinize
         state = rootstate.cloneAndRandomize(rootstate.getCurrentPlayer())
 
         # Select
+        #print("select")
         while state.getMoves() != [] and node.getUntriedMoves(state.getMoves()) == []: # node is fully expanded and non-terminal
             node = node.UCBSelectChild(state.getMoves())
             state.doMove(node.move)
 
         # Expand
+        #print("expand")
         untriedMoves = node.getUntriedMoves(state.getMoves())
         if untriedMoves != []: # if we can expand (i.e. state/node is non-terminal)
             m = random.choice(untriedMoves) 
@@ -34,7 +36,7 @@ def ISMCTS(rootstate, itermax, verbose = False):
             node = node.addChild(m, player) # add child and descend tree
 
         # Simulate
-        # print("simulate")
+        #print("simulate")
         while state.getMoves() != []: # while state is non-terminal
             state.doMove(random.choice(state.getMoves()))
 
@@ -44,7 +46,7 @@ def ISMCTS(rootstate, itermax, verbose = False):
             node = node.parentNode
 
     # Output some information about the tree - can be omitted
-    if (verbose): print (rootnode.treeToString(0))
-    else: print (rootnode.childrenToString())
+    #if (verbose): print (rootnode.treeToString(0))
+    #else: print (rootnode.childrenToString())
 
     return max(rootnode.childNodes, key = lambda c: c.visits).move # return the move that was most visited

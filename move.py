@@ -10,3 +10,9 @@ class Move:
 
     def __repr__(self):
         return f"[{self.actionType} {self.action} {self.tokensToRemove} {self.character}]"
+
+    def __eq__(self, other):
+        return self.actionType == other.actionType and self.action == other.action and self.tokensToRemove == other.tokensToRemove and self.character == other.character
+
+    def __ne__(self, other):
+        return not self.__eq__(other)
