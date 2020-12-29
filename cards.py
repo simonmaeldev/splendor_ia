@@ -22,13 +22,13 @@ class Card:
         
         
     def __str__(self):
-        return "vp: {}, color: {}, cost: {}, lvl{}".format(self.vp, strColor(self.bonus), [str(self.cost[i]) + strColor(i) for i in range(0,5)], self.lvl)
+        return self.getShow()
 
     def __repr__(self):
         return "|" + self.getShow() + "|"
 
     def __eq__(self, other):
-        return self.vp == other.vp and self.bonus == other.bonus and self.cost == other.cost and self.lvl == other.lvl and self.visible == other.visible
+        return type(self) == type(other) and self.vp == other.vp and self.bonus == other.bonus and self.cost == other.cost and self.lvl == other.lvl and self.visible == other.visible
 
     def __ne__(self, other):
         return not self.__eq__(other)

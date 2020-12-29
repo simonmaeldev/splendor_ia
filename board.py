@@ -17,7 +17,8 @@ class Board:
     """ A state of the game splendor
         visit to see full rulebook https://cdn.1j1ju.com/medias/7f/91/ba-splendor-rulebook.pdf
     """
-    def __init__(self, nbPlayer, IA):
+    def __init__(self, nbPlayer, IA, debug = False):
+        self.debug = debug
         self.deckLVL1 = [Card(c[0], c[1], c[2], c[3]) for c in DECK1]
         shuffle(self.deckLVL1)
         self.deckLVL2 = [Card(c[0], c[1], c[2], c[3]) for c in DECK2]
@@ -32,7 +33,9 @@ class Board:
         shuffle(self.characters)
         self.characters = self.characters[:nbPlayer + 1]
         self.displayedCards = [[self.deckLVL1.pop(0) for i in range(0,4)], [self.deckLVL2.pop(0) for i in range(0,4)], [self.deckLVL3.pop(0) for i in range(0,4)]]
-        self.players = [Player(str(i + 1), IA[i]) for i in range(0,nbPlayer)]
+        for c in flatten(self.displayedCards):
+            c.setVisible()
+        self.players = [Player(str(i), IA[i]) for i in range(0,nbPlayer)]
         self.endGame = False
         self.currentPlayer = 0
         self.nbTurn = 1
@@ -131,15 +134,18 @@ class Board:
         # print(f"{t} {b} {r} {self.getCurrentPlayer().tokens} {sum(self.getCurrentPlayer().tokens)}")
         if sum(self.getCurrentPlayer().tokens) >= MAX_NB_TOKENS and movesBuild:
             movesTokens = []
+        if movesTokens or movesBuild:
+           movesReserve = []
         return movesTokens + movesBuild + movesReserve
 
     def getPossibleTokens(self):
         """ return all combinations of tokens that it's possible to take
         """
         # first create all combinations of tokens
-        all3_3 = set(permutations([1,1,1,0,0]))
-        all3_2 = set(permutations([1,1,0,0,0]))
-        all3_1 = set(permutations([1,0,0,0,0]))
+        nbPossible = 5 - self.tokens[:5].count(0)
+        all3_3 = set(permutations([1,1,1,0,0])) if nbPossible >= 3 else []
+        all3_2 = set(permutations([1,1,0,0,0])) if nbPossible == 2 else []
+        all3_1 = set(permutations([1,0,0,0,0])) if nbPossible == 1 else []
         all2 = set(permutations([2,0,0,0,0]))
         allComb3 = list(all3_3) + list(all3_2) + list(all3_1)
         # check validity of each combination
@@ -180,8 +186,9 @@ class Board:
         build = []
         for i in range(0,len(allVisible)):
             for j in range(0, len(allVisible[i])):
-                if player.canBuild((i,j), self):
-                    build.append((i,j))
+                card = allVisible[i][j]
+                if player.canBuild(card):
+                    build.append(card)
         return build
 
     def makeMovesBuild(self, allBuild):
@@ -189,13 +196,11 @@ class Board:
         """
         moves = []
         bonus = self.getCurrentPlayer().getTotalBonus()
-        visible = self.getCurrentPlayer().getAllVisible(self)
-        for build in allBuild:
-            card = visible[build[0]][build[1]]
+        for card in allBuild:
             newBonus = bonus.copy()
             newBonus[card.bonus] += 1
             possible = list(filter(lambda c: all(color >=0 for color in substract(newBonus, c.cost)), self.characters))
-            moves += [Move(BUILD, build, NO_TOKENS, p) for p in possible] if possible else [Move(BUILD, build, NO_TOKENS, None)]
+            moves += [Move(BUILD, card, NO_TOKENS, p) for p in possible] if possible else [Move(BUILD, card, NO_TOKENS, None)]
         return moves
         
     def getPossibleReserve(self):
@@ -206,10 +211,10 @@ class Board:
             for i in range(0,len(self.displayedCards)):
                 # add visible cards
                 for j in range(0, len(self.displayedCards[i])):
-                    reserve.append((i,j))
+                    reserve.append(self.displayedCards[i][j])
                 # if there's still a deck of this lvl
                 if self.decks[i]:
-                    reserve.append((i,TOP_DECK))
+                    reserve.append(i)
         return reserve
         
     def makeMovesReserve(self, allReserve):
@@ -244,7 +249,8 @@ class Board:
         """ return 1 if the player is the one who won this game, 0 otherwise
         """
         # print(f"get result, turn n{self.nbTurn}")
-        return 1 if player == self.players[self.getVictorious()] else 0
+        score = 1 if player == self.players[self.getVictorious()] else 0
+        return score
 
     def checkEndGame(self, verbose = False):
         player = self.getCurrentPlayer()
@@ -253,11 +259,10 @@ class Board:
            self.endGame = True
 
     def getCard(self, move):
-        if move.actionType == RESERVE and move.action[1] == TOP_DECK: # reserve topdeck
-            return self.decks[move.action[0]][0]
+        if move.actionType == RESERVE and move.action in TOP_DECK: # reserve topdeck
+            return self.decks[move.action][0]
         else:
-            visiblePlayer = self.getCurrentPlayer().getAllVisible(self)
-            return visiblePlayer[move.action[0]][move.action[1]]
+            return move.action
         
     def build(self, move):
         """ current player build a card
@@ -300,14 +305,16 @@ class Board:
             self.characters.remove(move.character)
    
     def removeCard(self, move):
-        if move.action[1] == TOP_DECK: #top deck
-            del self.decks[move.action[0]][0]
+        if move.action in TOP_DECK: #top deck
+            del self.decks[move.action][0]
         else:
-            del self.displayedCards[move.action[0]][move.action[1]]
-            if len(self.decks[move.action[0]]) > 0:
-                newCard = self.decks[move.action[0]].pop(0)
+            #card = next(filter((lambda c: c == move.action), self.displayedCards[move.action.lvl - 1]))
+            card = move.action
+            self.displayedCards[card.lvl - 1].remove(card)
+            if len(self.decks[card.lvl - 1]) > 0:
+                newCard = self.decks[card.lvl - 1].pop(0)
                 newCard.setVisible()
-                self.displayedCards[move.action[0]].append(newCard)
+                self.displayedCards[card.lvl - 1].append(newCard)
     
     def show(self):
         print("===============================================================")

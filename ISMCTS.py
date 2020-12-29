@@ -5,12 +5,15 @@
 # remains in any distributed code.
 from node import *
 import random
+from timeit import default_timer as timer
 
-def ISMCTS(rootstate, itermax, verbose = False):
+def ISMCTS(rootstate, itermax, verbose = False, returnTree = False):
     """ Conduct an ISMCTS search for itermax iterations starting from rootstate.
             Return the best move from the rootstate.
     """
 
+    # n'est pas parallele + ne conserve pas l'arbre des decisions
+    start = timer()
     rootnode = Node()
 
     for i in range(itermax):
@@ -49,4 +52,45 @@ def ISMCTS(rootstate, itermax, verbose = False):
     #if (verbose): print (rootnode.treeToString(0))
     #else: print (rootnode.childrenToString())
 
+    end = timer()
+    #print(f'ismcts time : {end - start}')
+    return rootnode if returnTree else max(rootnode.childNodes, key = lambda c: c.visits).move # return the move that was most visited
+
+from multiprocessing import Pool, cpu_count
+
+def ISMCTS_para(rootstate, itermax, verbose = False):
+    """ Conduct an ISMCTS search for itermax iterations starting from rootstate.
+            Return the best move from the rootstate.
+    """
+    start = timer()
+    
+    np = cpu_count()
+    part_tree = map((lambda i: (rootstate, itermax//np, False, True)), range(np))
+
+    with Pool(processes=np) as pool:
+        #compute multiples tree at the same time
+        tree = pool.starmap(ISMCTS, part_tree)
+        # recompose tree
+        print(f'time simulation : {timer() - start}')
+        rootnode = tree[0]
+        for t in tree[1:]:
+            mergeTrees(rootnode, t)
+
+    end = timer()
+    print(f'total time: {end - start}') 
+    #print (rootnode.childrenToString())
     return max(rootnode.childNodes, key = lambda c: c.visits).move # return the move that was most visited
+
+def mergeTrees(originTree, addTree):
+    for ac in addTree.childNodes:
+        if ac in originTree.childNodes:
+            #merge the two identical nodes
+            oc = next(filter((lambda n: n == ac), originTree.childNodes))
+            oc.wins += ac.wins
+            oc.visits += ac.visits
+            oc.avails += ac.avails
+            mergeTrees(oc, ac)
+        else:
+            # add the node to the origin tree
+            originTree.childNodes.append(ac)
+            ac.parentNode = originTree

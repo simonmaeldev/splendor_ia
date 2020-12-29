@@ -1,5 +1,6 @@
 from constants import *
 from custom_operators import *
+import uuid
 
 class Player:
     def __init__(self, name, IA):
@@ -11,9 +12,10 @@ class Player:
         self.IA = IA
         # action : [type, card/tokenList, character/tokens to remove if too much]
         self.action = []
+        self.idCustom = uuid.uuid1()
 
     def __eq__(self, other):
-        return self.name == other.name and self.tokens == other.tokens and self.built == other.built and self.reserved == other.reserved and self.characters == other.characters and self.IA == other.IA
+        return other != None and self.idCustom == other.idCustom
 
     def __ne__(self, other):
         return not self.__eq__(other)
@@ -165,8 +167,7 @@ class Player:
         rc = self.realCost(card)
         return self.convertToGold(rc)
     
-    def canBuild(self, posCard, board):
-        card = self.getAllVisible(board)[posCard[0]][posCard[1]]
+    def canBuild(self, card): 
         cost = self.realGoldCost(card)
         return self.tokens[GOLD] >= cost[GOLD]
         
