@@ -28,7 +28,7 @@ def strColor(color):
         2: "v",
         3: "r",
         4: "n",
-        5: "o"
+        5: "g"
     }
     return colors.get(color, "invalid color")
 

@@ -17,7 +17,6 @@ def ISMCTS(rootstate, itermax, verbose = False, returnTree = False):
     rootnode = Node()
 
     for i in range(itermax):
-        #print(f"{i}/{itermax}")
         node = rootnode
 
         # Determinize
