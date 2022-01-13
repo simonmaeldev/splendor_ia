@@ -11,15 +11,15 @@ for table in cursor.fetchall() :
 
 conn.execute('''
 CREATE TABLE Player
-(IDPlayer INT PRIMARY KEY NOT NULL,
+(IDPlayer INTEGER PRIMARY KEY,
 Name CHAR(50)
 );
 ''')
 
 conn.execute('''
 CREATE TABLE Card
-(IDCard INT PRIMARY KEY NOT NULL,
-Bonus CHAR(8),
+(IDCard INTEGER PRIMARY KEY,
+Bonus CHAR(8) NOT NULL,
 CostWhite INT NOT NULL,
 CostBlue INT NOT NULL,
 CostGreen INT NOT NULL,
@@ -33,7 +33,7 @@ Level INT NOT NULL
 conn.execute('''
 CREATE TABLE Character
 (
-IDCharacter INT PRIMARY KEY NOT NULL,
+IDCharacter INTEGER PRIMARY KEY,
 VictoryPoints INT NOT NULL,
 CostWhite INT NOT NULL,
 CostBlue INT NOT NULL,
@@ -46,7 +46,7 @@ CostBlack INT NOT NULL
 conn.execute('''
 CREATE TABLE Game
 (
-IDGame INT PRIMARY KEY NOT NULL,
+IDGame INTEGER PRIMARY KEY,
 NbPlayers INT NOT NULL,
 P1 INT NOT NULL,
 P2 INT NOT NULL,
@@ -65,7 +65,7 @@ FOREIGN KEY (P4) REFERENCES Player(IDPlayer)
 conn.execute('''
 CREATE TABLE StateGame
 (
-IDStateGame INT PRIMARY KEY NOT NULL,
+IDStateGame INTEGER PRIMARY KEY,
 IDGame INT NOT NULL,
 TurnNumber INT NOT NULL,
 CurrentPlayer INT NOT NULL,
@@ -116,7 +116,7 @@ FOREIGN KEY (Character5) REFERENCES Character(IDCharacter)
 conn.execute('''
 CREATE TABLE StatePlayer
 (
-IDStatePlayer INT PRIMARY KEY NOT NULL,
+IDStatePlayer INTEGER PRIMARY KEY,
 IDGame INT NOT NULL,
 TurnNumber INT NOT NULL,
 PlayerNumber INT NOT NULL,
@@ -158,3 +158,4 @@ conn.commit()
 
 conn.close()
 
+print("database creation was successfull")

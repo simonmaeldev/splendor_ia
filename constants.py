@@ -22,13 +22,25 @@ MAX_RESERVE = 3
 TOP_DECK = [0,1,2]
 
 def strColor(color):
+    # mix of french and english
     colors = {
         0: "w",
         1: "b",
         2: "v",
         3: "r",
         4: "n",
-        5: "g"
+        5: "o"
+    }
+    return colors.get(color, "invalid color")
+
+def fullStrColor(color):
+    colors = {
+        0: "white",
+        1: "blue",
+        2: "green",
+        3: "red",
+        4: "black",
+        5: "gold"
     }
     return colors.get(color, "invalid color")
 
