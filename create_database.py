@@ -12,7 +12,7 @@ for table in cursor.fetchall() :
 conn.execute('''
 CREATE TABLE Player
 (IDPlayer INTEGER PRIMARY KEY,
-Name CHAR(50)
+Name CHAR(50) UNIQUE
 );
 ''')
 
@@ -133,9 +133,9 @@ BonusBlue INT NOT NULL,
 BonusGreen INT NOT NULL,
 BonusRed INT NOT NULL,
 BonusBlack INT NOT NULL,
-ReservedChard1 INT,
-ReservedChard2 INT,
-ReservedChard3 INT,
+ReservedCard1 INT,
+ReservedCard2 INT,
+ReservedCard3 INT,
 Character1 INT,
 Character2 INT,
 Character3 INT,
@@ -143,9 +143,9 @@ Character4 INT,
 Character5 INT,
 FOREIGN KEY (IDGame) REFERENCES Game(IDGame),
 FOREIGN KEY (IDPlayer) REFERENCES Player(IDPlayer),
-FOREIGN KEY (ReservedChard1) REFERENCES Card(IDCard),
-FOREIGN KEY (ReservedChard2) REFERENCES Card(IDCard),
-FOREIGN KEY (ReservedChard3) REFERENCES Card(IDCard),
+FOREIGN KEY (ReservedCard1) REFERENCES Card(IDCard),
+FOREIGN KEY (ReservedCard2) REFERENCES Card(IDCard),
+FOREIGN KEY (ReservedCard3) REFERENCES Card(IDCard),
 FOREIGN KEY (Character1) REFERENCES Character(IDCharacter),
 FOREIGN KEY (Character2) REFERENCES Character(IDCharacter),
 FOREIGN KEY (Character3) REFERENCES Character(IDCharacter),

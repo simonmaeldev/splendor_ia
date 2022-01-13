@@ -275,7 +275,7 @@ class Board:
         if card in player.reserved:
             player.reserved.remove(card)
             card.setVisible()
-        else :
+        else:
             self.removeCard(move)
         player.built.append(card)
 
@@ -346,3 +346,10 @@ class Board:
 
     def getShowTokens(self):
         return [f"{getColor(color)}{qtt}" for color, qtt in enumerate(self.tokens)]
+
+    def getState(self):
+        return [self.nbTurn, self.currentPlayer, self.tokens.copy(), self.displayedCards[0].copy(), self.displayedCards[1].copy(), self.displayedCards[2].copy(), self.characters.copy()]
+
+    def getPlayerState(self, playerNumber):
+        player = self.players[playerNumber]
+        return [player.getVictoryPoints(), player.tokens.copy(), player.getTotalBonus(), player.reserved.copy(), player.characters.copy()]
