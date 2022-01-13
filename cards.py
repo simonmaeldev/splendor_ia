@@ -28,7 +28,7 @@ class Card:
         return "|" + self.getShow() + "|"
 
     def __eq__(self, other):
-        return type(self) == type(other) and self.vp == other.vp and self.bonus == other.bonus and self.cost == other.cost and self.lvl == other.lvl and self.visible == other.visible
+        return type(self) == type(other) and self.vp == other.vp and self.bonus == other.bonus and self.cost == other.cost and self.lvl == other.lvl
 
     def __ne__(self, other):
         return not self.__eq__(other)
