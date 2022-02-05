@@ -63,7 +63,7 @@ def ISMCTS_para(rootstate, itermax, verbose = False):
     """
     start = timer()
     
-    np = cpu_count()
+    np = cpu_count() - 2
     part_tree = map((lambda i: (rootstate, itermax//np, False, True)), range(np))
 
     with Pool(processes=np) as pool:

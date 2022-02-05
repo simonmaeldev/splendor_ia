@@ -21,7 +21,7 @@ def getPlayersID(conn, cursor, nbIte, Players):
 def createGame(cursor, playersID, state, winner):
     sqlInsert = '''INSERT INTO Game (NbPlayers, P1, P2, P3, P4, VictoryPoints, NbTurns, Winner)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)'''
-    data = [len(playersID)] + [playersID[i] if i<len(playersID) else None for i in range(4)] + [state.players[winner].getVictoryPoints(), state.nbTurn, winner]
+    data = [len(playersID)] + [playersID[i] if i < len(playersID) else None for i in range(4)] + [state.players[winner].getVictoryPoints(), state.nbTurn, winner]
     cursor.execute(sqlInsert, tuple(data))
     return cursor.lastrowid
 
@@ -41,8 +41,8 @@ def loadCharacters(cursor):
 
 def saveGamesState(cursor, history, cards, characters, gameID):
     colnames = getColNames(cursor, "StateGame")[1:]
-    sqlInsert = '''INSERT INTO StateGame (''' + ", ".join(colnames) + ''') 
-    VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'''
+    sqlInsert = '''INSERT INTO StateGame (''' + ", ".join(colnames) + ''')
+    VALUES(''' + ", ".join(['?'] * len(colnames)) + ''')'''
     for s in history:
         # get cards ID and complete by none if there isn't 4 cards for this level
         cardsID = [cards[tuple(c.cost)] for c in s[3]] + [None] * (4-len(s[3])) + [cards[tuple(c.cost)] for c in s[4]] + [None] * (4-len(s[4])) + [cards[tuple(c.cost)] for c in s[5]] + [None] * (4-len(s[5]))
@@ -50,15 +50,31 @@ def saveGamesState(cursor, history, cards, characters, gameID):
         data = [gameID, s[0], s[1]] + s[2] + cardsID + charactersID
         cursor.execute(sqlInsert, tuple(data))
 
-def savePlayerState(cursor, gameID, playerID, playerPos, history, cards, characters):
+def savePlayerState(cursor, gameID, playerPos, history):
     colnames = getColNames(cursor, "StatePlayer")[1:]
-    sqlInsert = '''INSERT INTO StatePlayer (''' + ", ".join(colnames) + ''') VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'''
+    sqlInsert = '''INSERT INTO StatePlayer (''' + ", ".join(colnames) + ''')
+    VALUES(''' + ", ".join(['?'] * len(colnames)) + ''')'''
     for turn, s in enumerate(history):
-        cardsID = [cards[tuple(c.cost)] for c in s[3]] + [None] * (3 - len(s[3]))
-        charactersID = [characters[tuple(c.cost)] for c in s[4]] + [None] * (5 - len(s[4]))
-        data = [gameID, turn, playerPos, playerID, s[0]] + s[1] + s[2] + cardsID + charactersID
+        data = [gameID, turn, playerPos] + s
         cursor.execute(sqlInsert, tuple(data))
-       
+
+def savePlayerActions(cursor, gameID, playerPos, history, cards, characters):
+    colnames = getColNames(cursor, "Action")[1:]
+    sqlInsert = "INSERT INTO Action (" + ", ".join(colnames) + ") VALUES (" + ", ".join(['?']*len(colnames)) + ")"
+    for turn, a in enumerate(history):
+        if a.actionType in [BUILD, RESERVE]:
+            take = [None] * 6 if a.actionType == BUILD else TAKEONEGOLD
+            give = [None] * 6
+            cardID = cards[tuple(a.action.cost)] #will fail if someone reserve a top deck
+            characterID = characters[tuple(a.character.cost)] if a.character else None
+        else:
+            take = a.action
+            give = a.tokensToRemove
+            cardID = None
+            characterID = None
+        data = [gameID, turn, playerPos, a.actionType, cardID] + take + give + [characterID]
+        cursor.execute(sqlInsert, tuple(data))
+    
 def saveIntoBdd(state, winner, historyState, historyPlayers, historyActionPlayers, nbIte, Players):
     #connect to bdd
     conn = sqlite3.connect('games.db')
@@ -72,9 +88,10 @@ def saveIntoBdd(state, winner, historyState, historyPlayers, historyActionPlayer
     # insert states of games and players
     saveGamesState(cursor, historyState, cards, characters, gameID)
     for i, h in enumerate(historyPlayers):
-        savePlayerState(cursor, gameID, playersID[i], i, h, cards, characters)
+        savePlayerState(cursor, gameID, i, h)
     # insert actions of players
-
+    for i, ha in enumerate(historyActionPlayers):
+        savePlayerActions(cursor, gameID, i, ha, cards, characters)
     # only one commit at the very end, because there's only one connection at the same time for my db, therefor no concurrent access so I don't care
     conn.commit()
     conn.close()
@@ -96,9 +113,9 @@ def PlayGame(nbIte, Players):
         historyState.append(state.getState())
         currentPlayer = state.currentPlayer
         # Use different numbers of iterations (simulations, tree nodes) for different players
-        if Players[currentPlayer == "ISMCTS_PARA"]:
+        if Players[currentPlayer] == "ISMCTS_PARA":
                 m = ISMCTS_para(rootstate = state, itermax = nbIte[state.currentPlayer], verbose = False)
-        elif Players[currentPlayer == "ISMCTS"]:
+        elif Players[currentPlayer] == "ISMCTS":
                 m = ISMCTS(rootstate = state, itermax = nbIte[state.currentPlayer], verbose = False)
         print ("Best Move: " + str(m) + "\n")
         state.doMove(m)
@@ -111,5 +128,10 @@ def PlayGame(nbIte, Players):
     saveIntoBdd(state, winner, historyState, historyPlayers, historyActionPlayers, nbIte, Players)
 
 if __name__ == "__main__":
+    nbParties = 100
     while(True):
-        PlayGame([20000, 20000, 20000], ["ISMCTS_PARA", "ISMCTS_PARA", "ISMCTS_PARA"])
+        try:
+            PlayGame([1000, 1000, 1000], ["ISMCTS_PARA", "ISMCTS_PARA", "ISMCTS_PARA"])
+            nbParties = nbParties - 1
+        except(Exception):
+            pass

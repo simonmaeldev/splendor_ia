@@ -352,4 +352,4 @@ class Board:
 
     def getPlayerState(self, playerNumber):
         player = self.players[playerNumber]
-        return [player.getVictoryPoints(), player.tokens.copy(), player.getTotalBonus(), player.reserved.copy(), player.characters.copy()]
+        return player.tokens.copy()

@@ -8,7 +8,6 @@ def insertCharacter(character):
     sqlCharacter = '''INSERT INTO Character (VictoryPoints, CostWhite, CostBlue, CostGreen, CostRed, CostBlack)
     VALUES (?, ?, ?, ?, ?, ?)'''
     cur.execute(sqlCharacter, character)
-    conn.commit()
     
 def insertAllCharacters():
     for c in CHARACTERS:
@@ -20,7 +19,6 @@ def insertCard(card):
     sqlCard = '''INSERT INTO Card (Bonus, CostWhite, CostBlue, CostGreen, CostRed, CostBlack, VictoryPoints, Level)
 Values (?, ?, ?, ?, ?, ?, ?, ?)'''
     cur.execute(sqlCard, card)
-    conn.commit()
 
 def insertAllCards():
     allCards = DECK1 + DECK2 + DECK3
@@ -32,6 +30,7 @@ def insertAllCards():
 insertAllCharacters()
 insertAllCards()
 
+conn.commit()
 conn.close()
 
 print("database initialization was successfull")

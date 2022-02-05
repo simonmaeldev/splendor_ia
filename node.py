@@ -15,7 +15,7 @@ class Node:
         self.wins = 0
         self.visits = 0
         self.avails = 1
-        self.playerJustMoved = playerJustMoved # the only part of the state that the Node needs later
+        self.playerJustMoved = playerJustMoved  # the only part of the state that the Node needs later
 
     def getUntriedMoves(self, legalMoves):
         """ Return the elements of legalMoves for which this node does not have children.
