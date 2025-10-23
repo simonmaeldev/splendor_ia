@@ -4,9 +4,9 @@
 # Licence is granted to freely use and distribute for any sensible/legal purpose so long as this comment
 # remains in any distributed code.
 from typing import Union
-from node import *
-from board import Board
-from move import Move
+from .node import *
+from .board import Board
+from .move import Move
 import random
 from timeit import default_timer as timer
 

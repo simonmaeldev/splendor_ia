@@ -1,8 +1,8 @@
 from typing import List, Optional, Union, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from cards import Card
-    from characters import Character
+    from .cards import Card
+    from .characters import Character
 
 class Move:
     """ Define what a move is

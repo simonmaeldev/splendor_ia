@@ -1,6 +1,6 @@
 import sqlite3
 
-conn: sqlite3.Connection = sqlite3.connect('games.db')
+conn: sqlite3.Connection = sqlite3.connect('data/games.db')
 
 #drop all the tables
 cursor = conn.cursor()

@@ -1,6 +1,10 @@
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+
 from typing import List, Dict, Tuple, Any
-from board import *
-from ISMCTS import *
+from splendor.board import *
+from splendor.ISMCTS import *
 import sqlite3
 
 def getColNames(cursor: sqlite3.Cursor, table: str) -> List[str]:
@@ -78,7 +82,7 @@ def savePlayerActions(cursor: sqlite3.Cursor, gameID: int, playerPos: int, histo
 
 def saveIntoBdd(state: Board, winner: int, historyState: List[Any], historyPlayers: List[List[List[int]]], historyActionPlayers: List[List[Move]], nbIte: List[int], Players: List[str]) -> None:
     #connect to bdd
-    conn = sqlite3.connect('games.db')
+    conn = sqlite3.connect('data/games.db')
     cursor = conn.cursor()
     # load into memory
     cards = loadCards(cursor)

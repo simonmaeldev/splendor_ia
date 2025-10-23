@@ -1,5 +1,5 @@
 from typing import List
-from constants import *
+from .constants import *
 
 class Card:
     def __init__(self, victoryPoints: int, bonus: int, cost: List[int], lvl: int) -> None:

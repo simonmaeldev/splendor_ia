@@ -4,13 +4,13 @@
 # the rest by Maël Simon december 2020
 
 from typing import List, Optional, Union, Any
-from custom_operators import *
-from constants import *
+from .custom_operators import *
+from .constants import *
 from random import shuffle
-from player import *
-from characters import *
-from move import *
-from cards import *
+from .player import *
+from .characters import *
+from .move import *
+from .cards import *
 from copy import deepcopy
 from itertools import permutations
 

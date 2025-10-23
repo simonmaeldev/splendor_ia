@@ -1,8 +1,12 @@
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+
 from typing import Tuple
-from constants import *
+from splendor.constants import *
 import sqlite3
 
-conn: sqlite3.Connection = sqlite3.connect('games.db')
+conn: sqlite3.Connection = sqlite3.connect('data/games.db')
 cur: sqlite3.Cursor = conn.cursor()
 
 def insertCharacter(character: Tuple[int, int, int, int, int, int]) -> None:

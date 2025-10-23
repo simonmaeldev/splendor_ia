@@ -1,12 +1,12 @@
 from typing import List, Optional, Any, TYPE_CHECKING
-from constants import *
-from custom_operators import *
+from .constants import *
+from .custom_operators import *
 import uuid
 
 if TYPE_CHECKING:
-    from cards import Card
-    from characters import Character
-    from board import Board
+    from .cards import Card
+    from .characters import Character
+    from .board import Board
 
 class Player:
     def __init__(self, name: str, IA: Optional[str]) -> None:

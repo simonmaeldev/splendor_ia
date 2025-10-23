@@ -42,7 +42,7 @@ The project follows a multi-phase approach inspired by AlphaGo/AlphaZero methodo
 
 ### Database-Driven Analysis
 
-All games are recorded in a SQLite database (`games.db`) capturing:
+All games are recorded in a SQLite database (`data/games.db`) capturing:
 - Complete game state history (board positions, token counts, visible cards)
 - Player states (resources held, cards owned)
 - All actions taken with full context
@@ -56,18 +56,18 @@ The ISMCTS implementation uses the following hyperparameters:
 ### Core Parameters
 
 - **`itermax`**: Number of MCTS simulations per move (default: 1000)
-  - Configured in `main.py:135`
+  - Configured in `scripts/main.py:135`
   - Each iteration performs: determinization → selection → expansion → simulation → backpropagation
 
 - **`exploration`**: UCB1 exploration constant (default: 0.7 ≈ √2/2)
-  - Defined in `node.py:35` in the `UCBSelectChild()` method
+  - Defined in `src/splendor/node.py:35` in the `UCBSelectChild()` method
   - Balances exploitation of known good moves vs. exploration of uncertain moves
-  - UCB1 formula: `wins/visits + exploration * sqrt(log(avails)/visits)` (see `node.py:44`)
+  - UCB1 formula: `wins/visits + exploration * sqrt(log(avails)/visits)` (see `src/splendor/node.py:44`)
 
 ### Parallel Processing
 
 - **ISMCTS_para**: Parallelized version using multiprocessing
-  - Uses `(cpu_count() - 2)` processes (see `ISMCTS.py:69`)
+  - Uses `(cpu_count() - 2)` processes (see `src/splendor/ISMCTS.py:69`)
   - Divides iterations across processes, then merges resulting trees
   - Significantly faster for large iteration counts
 
@@ -76,38 +76,45 @@ The ISMCTS implementation uses the following hyperparameters:
 - **Determinization**: One per iteration
   - Each MCTS iteration samples a possible world state consistent with current information
   - Handles hidden information (opponent cards, deck composition)
-  - See `board.cloneAndRandomize()` called in `ISMCTS.py:26`
+  - See `board.cloneAndRandomize()` called in `src/splendor/ISMCTS.py:26`
 
 ### Selection Policy
 
 - **UCB1**: Upper Confidence Bound formula balances exploration/exploitation
-  - Implementation: `node.py:44`
+  - Implementation: `src/splendor/node.py:44`
   - Considers: win rate, exploration bonus, availability counts
 
 ## Project Structure
 
 ```
 .
-├── ISMCTS.py                   # ISMCTS algorithm implementation (sequential and parallel)
-├── README.md                   # Project documentation (this file)
-├── board.py                    # Board state representation and game logic
-├── cards.py                    # Card class definition
-├── characters.py               # Noble character class definition
-├── constants.py                # Game constants (all 40 cards, 10 nobles)
-├── create_database.py          # Database schema creation (DESTRUCTIVE - drops all tables)
-├── custom_operators.py         # Custom list manipulation operators
-├── games.db                    # SQLite database storing game history (16 MB)
-├── load_database.py            # Populate database with cards and nobles from constants
-├── main.py                     # Main execution script (runs MCTS self-play games)
-├── move.py                     # Move and action definitions
-├── node.py                     # MCTS tree node implementation
-├── player.py                   # Player state representation
-└── specs/                      # AI agent task specifications directory
+├── src/
+│   └── splendor/               # Main game engine package
+│       ├── __init__.py         # Package initialization with exports
+│       ├── board.py            # Board state representation and game logic
+│       ├── cards.py            # Card class definition
+│       ├── characters.py       # Noble character class definition
+│       ├── constants.py        # Game constants (all 40 cards, 10 nobles)
+│       ├── custom_operators.py # Custom list manipulation operators
+│       ├── ISMCTS.py           # ISMCTS algorithm implementation (sequential and parallel)
+│       ├── move.py             # Move and action definitions
+│       ├── node.py             # MCTS tree node implementation
+│       └── player.py           # Player state representation
+├── scripts/
+│   ├── __init__.py             # Scripts package initialization
+│   ├── main.py                 # Main execution script (runs MCTS self-play games)
+│   ├── create_database.py      # Database schema creation (DESTRUCTIVE - drops all tables)
+│   └── load_database.py        # Populate database with cards and nobles from constants
+├── data/
+│   ├── .gitkeep                # Ensures data directory is tracked
+│   └── games.db                # SQLite database storing game history
+├── specs/                      # AI agent task specifications directory
+└── README.md                   # Project documentation (this file)
 ```
 
 ## Database Schema
 
-The project uses SQLite for persistent storage of game data. All tables are defined in `create_database.py`.
+The project uses SQLite for persistent storage of game data. All tables are defined in `scripts/create_database.py`.
 
 ### Tables Overview
 
@@ -177,7 +184,7 @@ Player actions taken each turn.
 - Action records link to Game (one per player per turn)
 - Cards and Characters are referenced by both game states and actions
 
-Full schema details available in `create_database.py:13-159`.
+Full schema details available in `scripts/create_database.py:13-159`.
 
 ## Installation
 
@@ -215,9 +222,11 @@ The project uses only Python standard library modules (no external dependencies 
 
 5. **Initialize the database**:
 ```bash
-python create_database.py
-python load_database.py
+python scripts/create_database.py
+python scripts/load_database.py
 ```
+
+**Note**: Run scripts from the project root directory. Python automatically adds the current directory to `sys.path`, allowing the scripts to import from the `splendor` package.
 
 ## Usage
 
@@ -229,40 +238,40 @@ python load_database.py
 
 ```bash
 # DESTRUCTIVE: Drops ALL existing tables and recreates schema
-python create_database.py
+python scripts/create_database.py
 
 # Populates cards and nobles from constants.py
-python load_database.py
+python scripts/load_database.py
 ```
 
-**WARNING**: `create_database.py` will **DELETE ALL EXISTING DATA** in the database. Only run this for a fresh setup or when you want to completely reset the database.
+**WARNING**: `scripts/create_database.py` will **DELETE ALL EXISTING DATA** in the database. Only run this for a fresh setup or when you want to completely reset the database.
 
 #### Running Game Simulations
 
 ```bash
 # ADDITIVE: Runs games and appends results to database
-python main.py
+python scripts/main.py
 ```
 
 **Note**:
-- `main.py` runs an **infinite loop** (see `main.py:133`) and must be manually interrupted (Ctrl+C)
+- `scripts/main.py` runs an **infinite loop** (see `scripts/main.py:133`) and must be manually interrupted (Ctrl+C)
 - Each game appends new records to the database (safe for existing data)
-- Default configuration: 3 players, 1000 MCTS iterations per move, ISMCTS_PARA algorithm (see `main.py:135`)
+- Default configuration: 3 players, 1000 MCTS iterations per move, ISMCTS_PARA algorithm (see `scripts/main.py:135`)
 
 #### Database Preservation
 
 To preserve existing game data:
 ```bash
 # Backup before running create_database.py
-cp games.db games.db.backup
+cp data/games.db data/games.db.backup
 
 # Restore if needed
-cp games.db.backup games.db
+cp data/games.db.backup data/games.db
 ```
 
 #### Configuration
 
-Modify game parameters in `main.py:135`:
+Modify game parameters in `scripts/main.py:135`:
 ```python
 PlayGame(
     [1000, 1000, 1000],  # Iterations per player
@@ -276,4 +285,4 @@ Available algorithms:
 
 ### Implementation Details
 
-The MCTS implementation is based on work by Peter Cowling, Edward Powley, and Daniel Whitehouse (University of York, 2012-2013). See `ISMCTS.py:1-5` and `node.py:1-5` for attribution.
+The MCTS implementation is based on work by Peter Cowling, Edward Powley, and Daniel Whitehouse (University of York, 2012-2013). See `src/splendor/ISMCTS.py:1-5` and `src/splendor/node.py:1-5` for attribution.

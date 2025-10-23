@@ -7,9 +7,9 @@ from typing import List, Optional, TYPE_CHECKING
 from math import *
 
 if TYPE_CHECKING:
-    from move import Move
-    from player import Player
-    from board import Board
+    from .move import Move
+    from .player import Player
+    from .board import Board
 
 class Node:
     """ A node in the game tree. Note wins is always from the viewpoint of playerJustMoved.

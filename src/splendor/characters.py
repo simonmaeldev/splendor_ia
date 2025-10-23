@@ -1,5 +1,5 @@
 from typing import List
-from constants import *
+from .constants import *
 
 class Character:
     def __init__(self, victoryPoints: int, cost: List[int]) -> None:
