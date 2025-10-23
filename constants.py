@@ -1,3 +1,5 @@
+from typing import List
+
 WHITE = 0
 BLUE = 1
 GREEN = 2
@@ -21,7 +23,7 @@ NB_MINI_TOKEN_TAKE_2 = 4
 MAX_RESERVE = 3
 TOP_DECK = [0,1,2]
 
-def strColor(color):
+def strColor(color: int) -> str:
     # mix of french and english
     colors = {
         0: "w",
@@ -33,7 +35,7 @@ def strColor(color):
     }
     return colors.get(color, "invalid color")
 
-def fullStrColor(color):
+def fullStrColor(color: int) -> str:
     colors = {
         0: "white",
         1: "blue",
@@ -55,7 +57,7 @@ class bcolors:
     YELLOW ='\u001b[33m'
 
 
-def getColor(color):
+def getColor(color: int) -> str:
     if color == WHITE:
         return bcolors.WHITE
     elif color == BLUE:

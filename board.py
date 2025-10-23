@@ -3,6 +3,7 @@
 # Code for ISMCTS Written by Peter Cowling, Edward Powley, Daniel Whitehouse (University of York, UK) September 2012 - August 2013.
 # the rest by Maël Simon december 2020
 
+from typing import List, Optional, Union, Any
 from custom_operators import *
 from constants import *
 from random import shuffle
@@ -17,38 +18,38 @@ class Board:
     """ A state of the game splendor
         visit to see full rulebook https://cdn.1j1ju.com/medias/7f/91/ba-splendor-rulebook.pdf
     """
-    def __init__(self, nbPlayer, IA, debug = False):
-        self.debug = debug
-        self.deckLVL1 = [Card(c[0], c[1], c[2], c[3]) for c in DECK1]
+    def __init__(self, nbPlayer: int, IA: List[Optional[str]], debug: bool = False) -> None:
+        self.debug: bool = debug
+        self.deckLVL1: List[Card] = [Card(c[0], c[1], c[2], c[3]) for c in DECK1]
         shuffle(self.deckLVL1)
-        self.deckLVL2 = [Card(c[0], c[1], c[2], c[3]) for c in DECK2]
+        self.deckLVL2: List[Card] = [Card(c[0], c[1], c[2], c[3]) for c in DECK2]
         shuffle(self.deckLVL2)
-        self.deckLVL3 = [Card(c[0], c[1], c[2], c[3]) for c in DECK3]
+        self.deckLVL3: List[Card] = [Card(c[0], c[1], c[2], c[3]) for c in DECK3]
         shuffle(self.deckLVL3)
-        self.decks = [self.deckLVL1, self.deckLVL2, self.deckLVL3]
+        self.decks: List[List[Card]] = [self.deckLVL1, self.deckLVL2, self.deckLVL3]
         nbToken = self.getNbMaxTokens(nbPlayer)
         # color order : white blue green red black gold
-        self.tokens = [nbToken] * 5 + [5]
-        self.characters = [Character(c[0], c[1]) for c in CHARACTERS]
+        self.tokens: List[int] = [nbToken] * 5 + [5]
+        self.characters: List[Character] = [Character(c[0], c[1]) for c in CHARACTERS]
         shuffle(self.characters)
         self.characters = self.characters[:nbPlayer + 1]
-        self.displayedCards = [[self.deckLVL1.pop(0) for i in range(0,4)], [self.deckLVL2.pop(0) for i in range(0,4)], [self.deckLVL3.pop(0) for i in range(0,4)]]
+        self.displayedCards: List[List[Card]] = [[self.deckLVL1.pop(0) for i in range(0,4)], [self.deckLVL2.pop(0) for i in range(0,4)], [self.deckLVL3.pop(0) for i in range(0,4)]]
         for c in flatten(self.displayedCards):
             c.setVisible()
-        self.players = [Player(str(i), IA[i]) for i in range(0,nbPlayer)]
-        self.endGame = False
-        self.currentPlayer = 0
-        self.nbTurn = 1
-        self.isFinish = False
+        self.players: List[Player] = [Player(str(i), IA[i]) for i in range(0,nbPlayer)]
+        self.endGame: bool = False
+        self.currentPlayer: int = 0
+        self.nbTurn: int = 1
+        self.isFinish: bool = False
     
-    def getNbMaxTokens(self, nbPlayer):
+    def getNbMaxTokens(self, nbPlayer: int) -> int:
        if nbPlayer == 2:
            return NB_TOKEN_2
        elif nbPlayer == 3:
            return NB_TOKEN_3
        else : return NB_TOKEN_4
 
-    def clone(self):
+    def clone(self) -> 'Board':
         nbPlayer = len(self.players)
         st = Board(nbPlayer, [None] * nbPlayer)
         st.decks = deepcopy(self.decks)
@@ -62,7 +63,7 @@ class Board:
         st.isFinish = self.isFinish
         return st
 
-    def cloneAndRandomize(self, observer):
+    def cloneAndRandomize(self, observer: Player) -> 'Board':
         """ Create a deep clone of this game state, ranfomizing any information not visible to the specified observer player
         """
         st = self.clone()
@@ -85,14 +86,14 @@ class Board:
         st.decks = unseenCards
         return st
 
-    def getCurrentPlayer(self):
+    def getCurrentPlayer(self) -> Player:
         return self.players[self.currentPlayer]
-        
-    def getNextPlayer(self, currentPlayer):
+
+    def getNextPlayer(self, currentPlayer: int) -> Player:
         nxt = (currentPlayer + 1) % len(self.players)
         return self.players[nxt]
-    
-    def nextPlayer(self):
+
+    def nextPlayer(self) -> None:
         self.checkEndGame()
         self.currentPlayer = (self.currentPlayer + 1) % len(self.players)
         if self.currentPlayer == 0 and not self.endGame:
@@ -100,7 +101,7 @@ class Board:
         if self.endGame and self.currentPlayer == 0:
             self.isFinish = True
 
-    def doMove(self, move):
+    def doMove(self, move: Move) -> None:
         """ Update a state by carrying out the given move
         must update current player
         """
@@ -117,7 +118,7 @@ class Board:
         self.takeCharacter(move)
         self.nextPlayer()
         
-    def getMoves(self):
+    def getMoves(self) -> List[Move]:
         """ get all possible moves from this state
         """
         if self.isFinish: return []
@@ -138,7 +139,7 @@ class Board:
            movesReserve = []
         return movesTokens + movesBuild + movesReserve
 
-    def getPossibleTokens(self):
+    def getPossibleTokens(self) -> List[List[int]]:
         """ return all combinations of tokens that it's possible to take
         """
         # first create all combinations of tokens
@@ -153,7 +154,7 @@ class Board:
         valideComb2 = [comb + [0] for comb in map(list, all2) if self.tokens[comb.index(2)] >= NB_MINI_TOKEN_TAKE_2]
         return valideComb3 + valideComb2
         
-    def makeMovesTokens(self, allTokens):
+    def makeMovesTokens(self, allTokens: List[List[int]]) -> List[Move]:
         """ create all moves possibles when choosing to take tokens
         """
         moves = []
@@ -178,7 +179,7 @@ class Board:
             moves += [Move(TOKENS, comb, tga, None) for tga in tokensGiveAway] if tokensGiveAway else [Move(TOKENS, comb, NO_TOKENS, None)]
         return moves
 
-    def getPossibleBuild(self):
+    def getPossibleBuild(self) -> List[Card]:
         """ return position of all cards the player can build
         """
         player = self.getCurrentPlayer()
@@ -191,7 +192,7 @@ class Board:
                     build.append(card)
         return build
 
-    def makeMovesBuild(self, allBuild):
+    def makeMovesBuild(self, allBuild: List[Card]) -> List[Move]:
         """ create all moves possibles when choosing to  build
         """
         moves = []
@@ -203,10 +204,10 @@ class Board:
             moves += [Move(BUILD, card, NO_TOKENS, p) for p in possible] if possible else [Move(BUILD, card, NO_TOKENS, None)]
         return moves
         
-    def getPossibleReserve(self):
+    def getPossibleReserve(self) -> List[Union[Card, int]]:
         """ return all combinations of reserve that it's possible to take
         """
-        reserve = []
+        reserve: List[Union[Card, int]] = []
         if self.getCurrentPlayer().canReserve():
             for i in range(0,len(self.displayedCards)):
                 # add visible cards
@@ -216,8 +217,8 @@ class Board:
                 if self.decks[i]:
                     reserve.append(i)
         return reserve
-        
-    def makeMovesReserve(self, allReserve):
+
+    def makeMovesReserve(self, allReserve: List[Union[Card, int]]) -> List[Move]:
         """ create all moves possibles when choosing to  reserve
         """
         tokensGiveAway = list(map(list, set(permutations([1,0,0,0,0,0]))))
@@ -233,7 +234,7 @@ class Board:
                 moves += [Move(RESERVE, reserve, NO_TOKENS, None)]
         return moves
         
-    def getVictorious(self, verbose = False):
+    def getVictorious(self, verbose: bool = False) -> int:
         vp = [player.getVictoryPoints() for player in self.players]
         indices = [i for i, p in enumerate(vp) if p == max(vp)]
         if len(indices) == 1:
@@ -245,26 +246,26 @@ class Board:
         if verbose: print("player " + self.players[winner].name + " won")
         return winner
 
-    def getResult(self, player):
+    def getResult(self, player: Player) -> int:
         """ return 1 if the player is the one who won this game, 0 otherwise
         """
         # print(f"get result, turn n{self.nbTurn}")
         score = 1 if player == self.players[self.getVictorious()] else 0
         return score
 
-    def checkEndGame(self, verbose = False):
+    def checkEndGame(self, verbose: bool = False) -> None:
         player = self.getCurrentPlayer()
         if player.getVictoryPoints() >= VP_GOAL:
            if verbose: print(f"{bcolors.RED + bcolors.BOLD}WARNING it's the last turn ! {bcolors.RESET}")
            self.endGame = True
 
-    def getCard(self, move):
+    def getCard(self, move: Move) -> Card:
         if move.actionType == RESERVE and move.action in TOP_DECK: # reserve topdeck
             return self.decks[move.action][0]
         else:
             return move.action
-        
-    def build(self, move):
+
+    def build(self, move: Move) -> None:
         """ current player build a card
         """
         card = self.getCard(move)
@@ -279,32 +280,32 @@ class Board:
             self.removeCard(move)
         player.built.append(card)
 
-    def reserve(self, move):
+    def reserve(self, move: Move) -> None:
         card = self.getCard(move)
         self.removeCard(move)
         self.getCurrentPlayer().reserved.append(card)
         if self.tokens[GOLD]: self.takeTokens(Move(move.actionType, TAKEONEGOLD, move.tokensToRemove, move.character))
 
-    def takeTokens(self, move):
+    def takeTokens(self, move: Move) -> None:
         player = self.getCurrentPlayer()
         player.tokens = add(player.tokens, move.action)
         self.tokens = substract(self.tokens, move.action)
         if any(t < 0 for t in self.tokens):
             raise Exception("negatif tokens")
 
-    def removeTooManyTokens(self, move):
+    def removeTooManyTokens(self, move: Move) -> None:
         player = self.getCurrentPlayer()
         player.tokens = substract(player.tokens, move.tokensToRemove)
         self.tokens = add(self.tokens, move.tokensToRemove)
         if any(t < 0 for t in player.tokens):
             raise Exception("negatif tokens")
 
-    def takeCharacter(self, move):
+    def takeCharacter(self, move: Move) -> None:
         if move.character:
             self.getCurrentPlayer().characters.append(move.character)
             self.characters.remove(move.character)
-   
-    def removeCard(self, move):
+
+    def removeCard(self, move: Move) -> None:
         if move.action in TOP_DECK: #top deck
             del self.decks[move.action][0]
         else:
@@ -315,8 +316,8 @@ class Board:
                 newCard = self.decks[card.lvl - 1].pop(0)
                 newCard.setVisible()
                 self.displayedCards[card.lvl - 1].append(newCard)
-    
-    def show(self):
+
+    def show(self) -> None:
         print("===============================================================")
         print("tour n" + str(self.nbTurn))
         print()
@@ -344,12 +345,12 @@ class Board:
         # current player
         print("\nreserved cards of current player: " + self.getCurrentPlayer().showReserved())
 
-    def getShowTokens(self):
+    def getShowTokens(self) -> List[str]:
         return [f"{getColor(color)}{qtt}" for color, qtt in enumerate(self.tokens)]
 
-    def getState(self):
+    def getState(self) -> List[Any]:
         return [self.nbTurn, self.currentPlayer, self.tokens.copy(), self.displayedCards[0].copy(), self.displayedCards[1].copy(), self.displayedCards[2].copy(), self.characters.copy()]
 
-    def getPlayerState(self, playerNumber):
+    def getPlayerState(self, playerNumber: int) -> List[int]:
         player = self.players[playerNumber]
         return player.tokens.copy()

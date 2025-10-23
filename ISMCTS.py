@@ -1,13 +1,16 @@
 # https://gist.github.com/kjlubick/8ea239ede6a026a61f4d
 # Written by Peter Cowling, Edward Powley, Daniel Whitehouse (University of York, UK) September 2012 - August 2013.
-# 
+#
 # Licence is granted to freely use and distribute for any sensible/legal purpose so long as this comment
 # remains in any distributed code.
+from typing import Union
 from node import *
+from board import Board
+from move import Move
 import random
 from timeit import default_timer as timer
 
-def ISMCTS(rootstate, itermax, verbose = False, returnTree = False):
+def ISMCTS(rootstate: Board, itermax: int, verbose: bool = False, returnTree: bool = False) -> Union[Node, Move]:
     """ Conduct an ISMCTS search for itermax iterations starting from rootstate.
             Return the best move from the rootstate.
     """
@@ -57,7 +60,7 @@ def ISMCTS(rootstate, itermax, verbose = False, returnTree = False):
 
 from multiprocessing import Pool, cpu_count
 
-def ISMCTS_para(rootstate, itermax, verbose = False):
+def ISMCTS_para(rootstate: Board, itermax: int, verbose: bool = False) -> Move:
     """ Conduct an ISMCTS search for itermax iterations starting from rootstate.
             Return the best move from the rootstate.
     """
@@ -80,7 +83,7 @@ def ISMCTS_para(rootstate, itermax, verbose = False):
     #print (rootnode.childrenToString())
     return max(rootnode.childNodes, key = lambda c: c.visits).move # return the move that was most visited
 
-def mergeTrees(originTree, addTree):
+def mergeTrees(originTree: Node, addTree: Node) -> None:
     for ac in addTree.childNodes:
         if ac in originTree.childNodes:
             #merge the two identical nodes
