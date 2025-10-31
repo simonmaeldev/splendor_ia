@@ -227,18 +227,24 @@ def get_game_count_by_players(db_path: str, nb_players: int) -> int:
 
 # ===== Statistics Computation =====
 
-def compute_avg_duration(log_entries: List[LogEntry], nb_players: int) -> Optional[float]:
+def compute_avg_duration(log_entries: List[LogEntry], nb_players: int, limit: Optional[int] = 50) -> Optional[float]:
     """
     Compute average game duration for a specific player count.
 
     Args:
         log_entries: List of all log entries
         nb_players: Player count to filter by
+        limit: Maximum number of entries to use for calculation (default 50).
+               Set to None to use all entries.
 
     Returns:
         Average duration in seconds, or None if no entries found
     """
     filtered = [e for e in log_entries if e.nb_players == nb_players]
+
+    # Apply limit if specified
+    if limit is not None and len(filtered) > limit:
+        filtered = filtered[:limit]
 
     if not filtered:
         return None
@@ -505,19 +511,44 @@ def run_data_collection(
             remaining_games = target_games - current_count
             print(f"[{nb_players} players] Need {remaining_games} more games ({current_count}/{target_games} complete)\n")
 
+            # Initialize cache for average duration and log entries
+            cached_avg_duration = None
+            cached_log_entries = None
+            last_parse_count = -1  # Track when we last parsed
+
             # Run remaining games
             completed_this_session = 0
             while completed_this_session < remaining_games:
                 sim_num = current_count + completed_this_session + 1
+                current_game_count = current_count + completed_this_session
 
-                # Parse log for statistics
-                log_entries = parse_log_file(log_path)
-                avg_duration = compute_avg_duration(log_entries, nb_players)
+                # Determine if we need to recompute average duration
+                should_recompute = False
+                if current_game_count < 50:
+                    # Recompute every 10 games or on first game
+                    if current_game_count % 10 == 0 or current_game_count == 0:
+                        should_recompute = True
+                elif current_game_count == 50:
+                    # Compute one final time at exactly 50 games
+                    should_recompute = True
+                # else: current_game_count > 50, use cached value
+
+                # Parse log and compute average if needed
+                if should_recompute or cached_log_entries is None:
+                    log_entries = parse_log_file(log_path)
+                    cached_log_entries = log_entries
+                    cached_avg_duration = compute_avg_duration(log_entries, nb_players, limit=50)
+                    last_parse_count = current_game_count
+                else:
+                    # Use cached values
+                    log_entries = cached_log_entries
+
+                avg_duration = cached_avg_duration
 
                 # Display progress before game
                 progress = format_progress_display(
                     nb_players=nb_players,
-                    completed=current_count + completed_this_session,
+                    completed=current_game_count,
                     total=target_games,
                     session_start=session_start,
                     avg_duration=avg_duration,
@@ -548,8 +579,9 @@ def run_data_collection(
                     # Continue without incrementing - will be retried in next run
 
             # Final progress for this player count
+            # Parse one last time to get final stats
             log_entries = parse_log_file(log_path)
-            avg_duration = compute_avg_duration(log_entries, nb_players)
+            avg_duration = compute_avg_duration(log_entries, nb_players, limit=50)
             progress = format_progress_display(
                 nb_players=nb_players,
                 completed=target_games,

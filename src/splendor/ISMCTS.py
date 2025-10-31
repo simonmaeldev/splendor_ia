@@ -73,13 +73,13 @@ def ISMCTS_para(rootstate: Board, itermax: int, verbose: bool = False) -> Move:
         #compute multiples tree at the same time
         tree = pool.starmap(ISMCTS, part_tree)
         # recompose tree
-        print(f'time simulation : {timer() - start}')
+        # print(f'time simulation : {timer() - start}')
         rootnode = tree[0]
         for t in tree[1:]:
             mergeTrees(rootnode, t)
 
     end = timer()
-    print(f'total time: {end - start}') 
+    # print(f'total time: {end - start}') 
     #print (rootnode.childrenToString())
     return max(rootnode.childNodes, key = lambda c: c.visits).move # return the move that was most visited
 

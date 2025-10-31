@@ -4,6 +4,4 @@
 
 # Test configuration (small numbers for testing)
 # Note: Database currently has 1078 3-player games
-2: 100000
-3: 100000
-4: 100000
+2: 1000
