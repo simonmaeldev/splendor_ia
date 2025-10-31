@@ -1,0 +1,9 @@
+# Splendor Game Simulation Configuration
+# Format: nb_players: nb_games
+# Player count must be 2-4, game count must be positive
+
+# Test configuration (small numbers for testing)
+# Note: Database currently has 1078 3-player games
+2: 100000
+3: 100000
+4: 100000

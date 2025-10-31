@@ -133,10 +133,22 @@ def PlayGame(nbIte: List[int], Players: List[str]) -> None:
     saveIntoBdd(state, winner, historyState, historyPlayers, historyActionPlayers, nbIte, Players)
 
 if __name__ == "__main__":
-    nbParties = 100
-    while(True):
-        try:
-            PlayGame([1000, 1000, 1000], ["ISMCTS_PARA", "ISMCTS_PARA", "ISMCTS_PARA"])
-            nbParties = nbParties - 1
-        except(Exception):
-            pass
+    # Use the new safe data collection system
+    try:
+        from data_collector import run_data_collection
+        run_data_collection(
+            config_path='data/simulation_config.txt',
+            db_path='data/games.db',
+            log_path='data/simulation_log.txt'
+        )
+    except ImportError:
+        print("Error: Could not import data_collector module")
+        print("Falling back to simple mode...")
+        # Fallback to simple execution
+        nbParties = 100
+        while(True):
+            try:
+                PlayGame([1000, 1000, 1000], ["ISMCTS_PARA", "ISMCTS_PARA", "ISMCTS_PARA"])
+                nbParties = nbParties - 1
+            except(Exception):
+                pass

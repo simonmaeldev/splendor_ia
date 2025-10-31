@@ -103,11 +103,14 @@ The ISMCTS implementation uses the following hyperparameters:
 ├── scripts/
 │   ├── __init__.py             # Scripts package initialization
 │   ├── main.py                 # Main execution script (runs MCTS self-play games)
+│   ├── data_collector.py       # Safe data collection with progress tracking
 │   ├── create_database.py      # Database schema creation (DESTRUCTIVE - drops all tables)
 │   └── load_database.py        # Populate database with cards and nobles from constants
 ├── data/
 │   ├── .gitkeep                # Ensures data directory is tracked
-│   └── games.db                # SQLite database storing game history
+│   ├── games.db                # SQLite database storing game history
+│   ├── simulation_config.txt   # Configuration file for target game counts
+│   └── simulation_log.txt      # Log file tracking completed games (auto-generated)
 ├── specs/                      # AI agent task specifications directory
 └── README.md                   # Project documentation (this file)
 ```
@@ -248,15 +251,138 @@ python scripts/load_database.py
 
 #### Running Game Simulations
 
+The project includes a safe, configuration-driven data collection system that tracks progress, displays real-time statistics, and handles interruptions gracefully.
+
+##### Quick Start
+
+1. **Configure target game counts** in `data/simulation_config.txt`:
+```
+# Format: nb_players: nb_games
+2: 500
+3: 1000
+4: 500
+```
+
+2. **Run data collection**:
 ```bash
-# ADDITIVE: Runs games and appends results to database
 python scripts/main.py
 ```
 
-**Note**:
-- `scripts/main.py` runs an **infinite loop** (see `scripts/main.py:133`) and must be manually interrupted (Ctrl+C)
-- Each game appends new records to the database (safe for existing data)
-- Default configuration: 3 players, 1000 MCTS iterations per move, ISMCTS_PARA algorithm (see `scripts/main.py:135`)
+3. **Monitor progress** - The system displays:
+   - Progress bars for each player count
+   - Average game duration
+   - Estimated time remaining
+   - Estimated completion time
+   - Games completed/total
+
+4. **Interrupt safely** - Press Ctrl+C at any time:
+   - Database remains consistent (only complete games are saved)
+   - Progress is automatically saved to `data/simulation_log.txt`
+   - Run again to continue from where you left off
+
+##### Configuration File Format
+
+Edit `data/simulation_config.txt` to specify target game counts:
+
+```
+# Splendor Game Simulation Configuration
+# Format: nb_players: nb_games
+# Player count must be 2-4, game count must be positive
+
+2: 500    # Target: 500 games with 2 players
+3: 1000   # Target: 1000 games with 3 players
+4: 500    # Target: 500 games with 4 players
+```
+
+**Features**:
+- Comments supported (lines starting with `#`)
+- System automatically checks current database counts
+- Only runs remaining games needed to meet targets
+- Processes player counts sequentially (2 → 3 → 4)
+
+##### Progress Tracking
+
+The system maintains detailed logs in `data/simulation_log.txt`:
+
+```
+2 players, 15 turns, started: 2025-10-31 14:30:45, ended: 2025-10-31 14:31:30, duration: 45.3s, 1/500
+2 players, 18 turns, started: 2025-10-31 14:31:30, ended: 2025-10-31 14:32:20, duration: 50.1s, 2/500
+...
+```
+
+**Log format**:
+- `nb_players`: Number of players in game
+- `nb_turns`: Total turns taken
+- `started/ended`: Timestamps (YYYY-MM-DD HH:MM:SS)
+- `duration`: Game duration in seconds
+- `sim_num/total_sims`: Progress (current/target)
+
+##### Example Output
+
+```
+=== Splendor Data Collection ===
+Config: 2 players: 500 games | 3 players: 1000 games | 4 players: 500 games
+
+[2 players] 245/500 games (49%)
+[===========================>                         ] 49%
+Started on: 31 Oct, 14:30
+Average duration: 45.3s
+Estimated remaining: 0d, 03:12
+Estimated completion: 31 Oct, 17:42
+
+Running game 246/500...
+```
+
+##### Safety Features
+
+**Atomic Database Commits**:
+- Each game is committed as a single transaction
+- Interruptions (Ctrl+C, crashes) never leave partial games in database
+- Database integrity is always maintained
+
+**Auto-Resume**:
+- System queries database on startup to determine current progress
+- Automatically continues from where it left off
+- Works across multiple sessions and interruptions
+
+**Error Handling**:
+- Failed games are logged but skipped
+- System continues to next game without stopping
+- No data corruption from game execution errors
+
+##### Algorithm Configuration
+
+Default settings (configured in `scripts/data_collector.py`):
+- **Algorithm**: `ISMCTS_PARA` (parallel MCTS)
+- **Iterations**: 1000 per player
+- **Player count**: Automatically uses 2, 3, or 4 players based on config
+
+Available algorithms:
+- `"ISMCTS"`: Sequential MCTS (slower, single-threaded)
+- `"ISMCTS_PARA"`: Parallel MCTS (faster, uses multiprocessing)
+
+To modify defaults, edit `scripts/data_collector.py:490-491`.
+
+##### Validation Commands
+
+Check system health:
+
+```bash
+# Validate configuration parsing
+python -c "import sys; sys.path.insert(0, 'scripts'); import data_collector as dc; config = dc.parse_config('data/simulation_config.txt'); print('Config valid' if config else 'Config invalid')"
+
+# Check log file parsing
+python -c "import sys; sys.path.insert(0, 'scripts'); import data_collector as dc; entries = dc.parse_log_file('data/simulation_log.txt'); print(f'Parsed {len(entries)} log entries')"
+
+# Query database counts
+python -c "import sys; sys.path.insert(0, 'scripts'); import data_collector as dc; count = dc.get_game_count_by_players('data/games.db', 3); print(f'Found {count} 3-player games')"
+
+# Run comprehensive validation
+python -c "import sys; sys.path.insert(0, 'scripts'); import data_collector as dc; dc.validate_all_systems('data/simulation_config.txt', 'data/games.db', 'data/simulation_log.txt')"
+
+# Check database integrity
+python -c "import sqlite3; conn = sqlite3.connect('data/games.db'); cursor = conn.cursor(); cursor.execute('SELECT COUNT(*) FROM Game'); print(f'Total games in database: {cursor.fetchone()[0]}'); conn.close()"
+```
 
 #### Database Preservation
 
@@ -268,20 +394,6 @@ cp data/games.db data/games.db.backup
 # Restore if needed
 cp data/games.db.backup data/games.db
 ```
-
-#### Configuration
-
-Modify game parameters in `scripts/main.py:135`:
-```python
-PlayGame(
-    [1000, 1000, 1000],  # Iterations per player
-    ["ISMCTS_PARA", "ISMCTS_PARA", "ISMCTS_PARA"]  # Algorithm per player
-)
-```
-
-Available algorithms:
-- `"ISMCTS"`: Sequential MCTS (slower, single-threaded)
-- `"ISMCTS_PARA"`: Parallel MCTS (faster, uses multiprocessing)
 
 ### Implementation Details
 

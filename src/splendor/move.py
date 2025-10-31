@@ -10,7 +10,7 @@ class Move:
 
     def __init__(self, actionType: int, action: Union[List[int], 'Card', int], tokensToRemove: List[int], characterSelected: Optional['Character']) -> None:
         self.actionType: int = actionType # can be BUILD, RESERVE, TAKE2, TAKE3
-        self.action: Union[List[int], 'Card', int] = action # if build or reserve : [[lvl][pos]], if take tokens : list of tokens
+        self.action: Union[List[int], 'Card', int] = action # if build or reserve from visible : the card, if take tokens : list of tokens, if reserve from top deck then the deck level (int)
         self.tokensToRemove: List[int] = tokensToRemove # tokens the player will remove at the end of his turn if he have too many of them
         self.character: Optional['Character'] = characterSelected # the noble the player will take if he can take one
 
