@@ -5,6 +5,7 @@ A machine learning project to develop an AI capable of playing Splendor at a hig
 ## Table of Contents
 - [Project Description](#project-description)
 - [MCTS Configuration](#mcts-configuration)
+- [Dataset Statistics](#dataset-statistics)
 - [Project Structure](#project-structure)
 - [Database Schema](#database-schema)
 - [Installation](#installation)
@@ -83,6 +84,21 @@ The ISMCTS implementation uses the following hyperparameters:
 - **UCB1**: Upper Confidence Bound formula balances exploration/exploitation
   - Implementation: `src/splendor/node.py:44`
   - Considers: win rate, exploration bonus, availability counts
+
+## Dataset Statistics
+
+The current dataset contains **1,743,688 game state/action pairs** collected from MCTS self-play games:
+
+- **2 players**: 582,240 actions
+- **3 players**: 581,688 actions
+- **4 players**: 579,760 actions
+
+**Total computation time**: 126 hours (5.25 days) on an Intel Core i9-13900KF processor.
+
+To calculate total duration from your own simulation logs, use:
+```bash
+python scripts/calculate_total_duration.py
+```
 
 ## Project Structure
 
