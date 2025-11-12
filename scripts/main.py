@@ -108,7 +108,7 @@ def PlayGame(nbIte: List[int], Players: List[str]) -> None:
     state = Board(len(Players), Players, debug = False)
     historyPlayers: List[List[List[int]]] = []
     historyState: List[Any] = []
-    historyActionPlayers: List[List[Move]] = [[]] * len(Players)
+    historyActionPlayers: List[List[Move]] = [[] for _ in range(len(Players))]
     for p in range(len(Players)):
         # initial state, turn 0
         historyPlayers += [[state.getPlayerState(p)]]
