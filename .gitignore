@@ -130,3 +130,9 @@ dmypy.json
 
 # Claude Code
 .claude/
+
+# Game data CSV files
+data/games/all_games.csv
+data/games/2_games/*.csv
+data/games/3_games/*.csv
+data/games/4_games/*.csv
