@@ -410,13 +410,17 @@ def run_single_game_safe(
 
         historyPlayers: List[List[List[int]]] = []
         historyState: List[Any] = []
-        historyActionPlayers: List[List[Move]] = [[]] * nb_players
+        historyActionPlayers: List[List[Move]] = [[] for _ in range(nb_players)]  # Fixed reference bug
+        deck_remaining_history: List[List[int]] = []
+        # For CSV export: store (board_state, move, turn_num) tuples
+        states_and_actions: List[Tuple[Any, Move, int]] = []
 
         for p in range(nb_players):
             historyPlayers += [[state.getPlayerState(p)]]
 
         while (state.getMoves() != []):
             historyState.append(state.getState())
+            deck_remaining_history.append([len(state.deckLVL1), len(state.deckLVL2), len(state.deckLVL3)])
             currentPlayer = state.currentPlayer
 
             if players[currentPlayer] == "ISMCTS_PARA":
@@ -424,15 +428,37 @@ def run_single_game_safe(
             elif players[currentPlayer] == "ISMCTS":
                 m = ISMCTS(rootstate=state, itermax=iterations[currentPlayer], verbose=False)
 
-            state.doMove(m)
-            historyActionPlayers[currentPlayer].append(m)
+            # CRITICAL: Store deep copy of state BEFORE executing action (for CSV export)
+            from copy import deepcopy
+            state_copy = deepcopy(state)
+            states_and_actions.append((state_copy, m, state.nbTurn))
+
+            # CRITICAL: Capture player state BEFORE executing action (for ML training)
             historyPlayers[currentPlayer].append(state.getPlayerState(currentPlayer))
+            historyActionPlayers[currentPlayer].append(m)
+
+            # Execute action
+            state.doMove(m)
 
         winner = state.getVictorious(False)
         nb_turns = state.nbTurn
 
+        # Extract board states from states_and_actions for database save
+        board_states = [state_copy for state_copy, move, turn_num in states_and_actions]
+
         # Save to database (atomic operation)
-        saveIntoBdd(state, winner, historyState, historyPlayers, historyActionPlayers, iterations, players)
+        gameID = saveIntoBdd(state, winner, historyState, historyPlayers, historyActionPlayers, iterations, players, deck_remaining_history, board_states)
+
+        # Export to CSV AFTER database save (to use real game ID)
+        try:
+            from splendor.csv_exporter import export_game_to_csv
+            from pathlib import Path
+            # Use absolute path for CSV export to ensure correct location
+            project_root = Path(__file__).parent.parent
+            csv_output_dir = project_root / 'data' / 'games'
+            export_game_to_csv(gameID, nb_players, states_and_actions, str(csv_output_dir))
+        except Exception as e:
+            print(f"Warning: Failed to export game to CSV: {e}")
 
         time_end = datetime.now()
         duration = (time_end - time_start).total_seconds()

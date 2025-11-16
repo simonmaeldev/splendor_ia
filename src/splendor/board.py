@@ -279,11 +279,14 @@ class Board:
         else:
             self.removeCard(move)
         player.built.append(card)
+        player.updateStateAfterBuild(card)
 
     def reserve(self, move: Move) -> None:
         card = self.getCard(move)
         self.removeCard(move)
-        self.getCurrentPlayer().reserved.append(card)
+        player = self.getCurrentPlayer()
+        player.reserved.append(card)
+        player.updateStateAfterReserve()
         if self.tokens[GOLD]: self.takeTokens(Move(move.actionType, TAKEONEGOLD, move.tokensToRemove, move.character))
 
     def takeTokens(self, move: Move) -> None:
@@ -302,7 +305,9 @@ class Board:
 
     def takeCharacter(self, move: Move) -> None:
         if move.character:
-            self.getCurrentPlayer().characters.append(move.character)
+            player = self.getCurrentPlayer()
+            player.characters.append(move.character)
+            player.updateStateAfterNoble(move.character)
             self.characters.remove(move.character)
 
     def removeCard(self, move: Move) -> None:

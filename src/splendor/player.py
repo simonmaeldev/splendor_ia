@@ -19,6 +19,9 @@ class Player:
         # action : [type, card/tokenList, character/tokens to remove if too much]
         self.action: List[Any] = []
         self.idCustom: uuid.UUID = uuid.uuid1()
+        # State tracking for performance (avoid reconstruction)
+        self.vp: int = 0
+        self.reductions: List[int] = [0, 0, 0, 0, 0]
 
     def __eq__(self, other: object) -> bool:
         return other != None and self.idCustom == other.idCustom
@@ -151,13 +154,10 @@ class Player:
             return color
     
     def getVictoryPoints(self) -> int:
-        return sum([card.vp for card in self.built]) + sum([c.vp for c in self.characters])
+        return self.vp
 
     def getTotalBonus(self) -> List[int]:
-        bonus = [0] * 5
-        for card in self.built:
-            bonus[card.bonus] += 1
-        return bonus
+        return self.reductions.copy()
 
     def realCost(self, card: 'Card') -> List[int]:
         cardCostWithBonus = substract(card.cost, self.getTotalBonus())
@@ -185,3 +185,17 @@ class Player:
 
     def canReserve(self) -> bool:
         return len(self.reserved) < MAX_RESERVE
+
+    def updateStateAfterBuild(self, card: 'Card') -> None:
+        """Update player state after building a card."""
+        self.vp += card.vp
+        if 0 <= card.bonus < 5:
+            self.reductions[card.bonus] += 1
+
+    def updateStateAfterNoble(self, character: 'Character') -> None:
+        """Update player state after attracting a noble."""
+        self.vp += character.vp
+
+    def updateStateAfterReserve(self) -> None:
+        """Update player state after reserving a card (no state changes)."""
+        pass

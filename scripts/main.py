@@ -73,54 +73,29 @@ def savePlayerState(cursor: sqlite3.Cursor, gameID: int, playerPos: int, history
                    cards: Dict[Tuple[int, int, int, int, int], int]) -> None:
     """
     Save player state with enriched data (victory points, reductions, reserved cards).
-
-    Note: This reconstruction is needed because we changed state capture timing but need
-    to maintain backward compatibility with the database structure.
+    Reads state directly from Player objects instead of reconstructing from history.
     """
     colnames = getColNames(cursor, "StatePlayer")[1:]
     sqlInsert = '''INSERT INTO StatePlayer (''' + ", ".join(colnames) + ''')
     VALUES(''' + ", ".join(['?'] * len(colnames)) + ''')'''
 
-    # Reconstruct player state at each turn from action history
-    vp = 0
-    reductions = [0, 0, 0, 0, 0]  # white, blue, green, red, black
-    reserved_card_ids = []
-
+    # Read state directly from board_states
     for turn, tokens in enumerate(history):
-        # Calculate VP and reductions from actions up to this turn
-        if turn > 0 and turn - 1 < len(historyActionPlayers[playerPos]):
-            # Check previous turn's action
-            prev_action = historyActionPlayers[playerPos][turn - 1]
+        player = board_states[turn].players[playerPos]
+        vp = player.vp
+        reductions = player.reductions.copy()
 
-            # Update built cards (adds VP and reductions)
-            if prev_action.actionType == BUILD and hasattr(prev_action, 'action'):
-                card = prev_action.action
-                vp += card.vp
-                if 0 <= card.bonus < 5:
-                    reductions[card.bonus] += 1
-                # If building from reserve, remove from reserved list
-                if hasattr(prev_action, 'card'):
-                    try:
-                        card_id = cards[tuple(prev_action.card.cost)]
-                        if card_id in reserved_card_ids:
-                            reserved_card_ids.remove(card_id)
-                    except (KeyError, AttributeError):
-                        pass
-
-            # Update reserved cards
-            elif prev_action.actionType == RESERVE and hasattr(prev_action, 'action'):
-                try:
-                    card_id = cards[tuple(prev_action.action.cost)]
-                    reserved_card_ids.append(card_id)
-                except (KeyError, AttributeError):
-                    pass
-
-            # Update VP from characters
-            if hasattr(prev_action, 'character') and prev_action.character:
-                vp += prev_action.character.vp
-
-        # Pad reserved cards to 3 slots
-        reserved_ids_padded = reserved_card_ids[:3] + [None] * (3 - len(reserved_card_ids))
+        # Get reserved card IDs
+        reserved_cards = player.reserved
+        reserved_ids = []
+        for card in reserved_cards[:3]:
+            try:
+                card_id = cards[tuple(card.cost)]
+                reserved_ids.append(card_id)
+            except KeyError:
+                # Card not in lookup, skip it
+                pass
+        reserved_ids_padded = reserved_ids + [None] * (3 - len(reserved_ids))
 
         # Build data row: gameID, turn, playerPos, tokens(6), vp, reductions(5), reserved(3)
         data = [gameID, turn, playerPos] + list(tokens) + [vp] + reductions + reserved_ids_padded
@@ -145,12 +120,13 @@ def savePlayerActions(cursor: sqlite3.Cursor, gameID: int, playerPos: int, histo
 
 def saveIntoBdd(state: Board, winner: int, historyState: List[Any], historyPlayers: List[List[List[int]]],
                historyActionPlayers: List[List[Move]], nbIte: List[int], Players: List[str],
-               deck_remaining_history: List[List[int]]) -> None:
+               deck_remaining_history: List[List[int]], board_states: List[Board]) -> None:
     """
     Save game data to database with enriched state information.
 
     Args:
         deck_remaining_history: List of [deck1_remaining, deck2_remaining, deck3_remaining] for each turn
+        board_states: List of Board objects (deep copies) for each turn
     """
     #connect to bdd
     conn = sqlite3.connect('data/games.db')
@@ -164,7 +140,7 @@ def saveIntoBdd(state: Board, winner: int, historyState: List[Any], historyPlaye
     # insert states of games and players
     saveGamesState(cursor, historyState, cards, characters, gameID, deck_remaining_history)
     for i, h in enumerate(historyPlayers):
-        savePlayerState(cursor, gameID, i, h, historyState, historyActionPlayers, cards)
+        savePlayerState(cursor, gameID, i, h, board_states, historyActionPlayers, cards)
     # insert actions of players
     for i, ha in enumerate(historyActionPlayers):
         savePlayerActions(cursor, gameID, i, ha, cards, characters)
@@ -217,21 +193,23 @@ def PlayGame(nbIte: List[int], Players: List[str]) -> None:
     state.show()
     winner = state.getVictorious(True)
 
-    # Export to CSV BEFORE database save (to preserve data even if DB save fails)
+    # Extract board states from states_and_actions for database save
+    board_states = [state_copy for state_copy, move, turn_num in states_and_actions]
+
+    # Save to database
+    gameID = saveIntoBdd(state, winner, historyState, historyPlayers, historyActionPlayers,
+                        nbIte, Players, deck_remaining_history, board_states)
+
+    # Export to CSV AFTER database save (to use real game ID)
     try:
         from pathlib import Path
         # Use absolute path for CSV export to ensure correct location
         project_root = Path(__file__).parent.parent
         csv_output_dir = project_root / 'data' / 'games'
-        gameID = len(historyState)  # Temporary ID for CSV export
         export_game_to_csv(gameID, len(Players), states_and_actions, str(csv_output_dir))
         print(f"Exported game {gameID} to CSV successfully")
     except Exception as e:
         print(f"Warning: Failed to export game to CSV: {e}")
-
-    # Save to database
-    gameID = saveIntoBdd(state, winner, historyState, historyPlayers, historyActionPlayers,
-                        nbIte, Players, deck_remaining_history)
 
 if __name__ == "__main__":
     # Use the new safe data collection system

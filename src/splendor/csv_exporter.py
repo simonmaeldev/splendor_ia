@@ -96,12 +96,13 @@ def rotate_players_by_current(player_numbers: List[int], current_player: int) ->
 
 
 def generate_input_column_headers() -> List[str]:
-    """Generate 381 input feature column headers."""
+    """Generate 382 input feature column headers."""
     headers = []
 
     # Basic info
     headers.append('num_players')
     headers.append('turn_number')
+    headers.append('current_player')
 
     # Gems on board
     for color in COLOR_NAMES:
@@ -178,16 +179,16 @@ def encode_player_state_from_board(board, player_num: int, turn_position: int) -
 
     Args:
         board: Board object containing full game state
-        player_num: Player number (0-3)
-        turn_position: Position relative to current player (0-3)
+        player_num: Absolute player number (0-3)
+        turn_position: Position relative to current player (0-3, unused)
 
     Returns:
         [position, vp, gems(6), reductions(5), reserved_cards(3x12)]
     """
     features = []
 
-    # Turn position relative to current player - integer
-    features.append(turn_position)
+    # Absolute player position - integer (0-3)
+    features.append(player_num)
 
     # Get player object
     player = board.players[player_num]
@@ -221,18 +222,19 @@ def encode_player_state_from_board(board, player_num: int, turn_position: int) -
 
 def encode_game_state_from_board(board, action_turn_num: int) -> List:
     """
-    Encode the complete game state into 381 features from board state.
+    Encode the complete game state into 382 features from board state.
 
     Args:
         board: Board object containing full game state
         action_turn_num: Turn number for this action
 
     Returns:
-        381 features:
+        382 features:
         - num_players (1)
         - turn_number (1)
+        - current_player (1)
         - gems_board (6)
-        - visible_cards (12 x 12 = 144)
+        - visible_cards (12 x 12 = 144, padded with NaN when decks depleted)
         - deck_remaining (3)
         - nobles (5 x 6 = 30)
         - players (4 x 49 = 196)
@@ -246,15 +248,23 @@ def encode_game_state_from_board(board, action_turn_num: int) -> List:
     # Turn number - integer
     features.append(action_turn_num)
 
+    # Current player - integer (0-based)
+    features.append(board.currentPlayer)
+
     # Gems on board (6: white, blue, green, red, black, gold) - integers
     gems_board = deepcopy(board.tokens)
     features.extend(gems_board)
 
     # Visible cards (12 cards: 4 per level, levels 1-3)
-    # displayedCards is [level1[4], level2[4], level3[4]]
+    # displayedCards is [level1[0-4], level2[0-4], level3[0-4]]
+    # Always encode exactly 4 slots per level, padding with NaN if deck is depleted
     for level_cards in board.displayedCards:
-        for card in level_cards:
-            features.extend(encode_card(card))
+        for i in range(4):
+            if i < len(level_cards):
+                features.extend(encode_card(level_cards[i]))
+            else:
+                # Deck depleted, no card in this slot - encode as NaN
+                features.extend(encode_card(None))
 
     # Deck remaining counts (3: level 1, 2, 3) - integers
     features.append(len(board.deckLVL1))
@@ -269,12 +279,12 @@ def encode_game_state_from_board(board, action_turn_num: int) -> List:
         else:
             features.extend([float('nan')] * 6)
 
-    # Players (4 players, rotated so current player is first)
+    # Players (4 players, rotated so current player is first, with absolute positions preserved)
     player_numbers = list(range(num_players))
     current_player = board.currentPlayer
     rotated_players = rotate_players_by_current(player_numbers, current_player)
 
-    # Encode each player
+    # Encode each player (player_num is absolute position, stored in playerX_position field)
     for position, player_num in enumerate(rotated_players):
         features.extend(encode_player_state_from_board(board, player_num, position))
 
@@ -284,8 +294,8 @@ def encode_game_state_from_board(board, action_turn_num: int) -> List:
         rotated_players.append(-1)
 
     # Validation
-    if len(features) != 381:
-        raise ValueError(f"Expected 381 features, got {len(features)}")
+    if len(features) != 382:
+        raise ValueError(f"Expected 382 features, got {len(features)}")
 
     return features
 
@@ -361,11 +371,11 @@ def encode_action_from_move(move, board) -> Dict[str, Any]:
     elif action_type == RESERVE:
         action_type_str = "reserve"
     elif action_type == TOKENS:
-        total_taken = sum(take_tokens[:5])  # Exclude gold
-        if total_taken == 2:
-            action_type_str = "take 2 tokens"
+        # Check pattern: take 2 = contains a 2, take 3 = contains only 1s
+        if any(t == 2 for t in take_tokens[:5]):
+            action_type_str = "take 2 tokens"  # Has a 2: [2,0,0,0,0], [0,2,0,0,0], etc.
         else:
-            action_type_str = "take 3 tokens"
+            action_type_str = "take 3 tokens"  # Only 1s: [1,1,1,0,0], [1,1,0,0,0], [1,0,0,0,0]
     else:
         action_type_str = "unknown"
 
