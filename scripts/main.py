@@ -101,14 +101,31 @@ def savePlayerState(cursor: sqlite3.Cursor, gameID: int, playerPos: int, history
         data = [gameID, turn, playerPos] + list(tokens) + [vp] + reductions + reserved_ids_padded
         cursor.execute(sqlInsert, tuple(data))
 
-def savePlayerActions(cursor: sqlite3.Cursor, gameID: int, playerPos: int, history: List[Move], cards: Dict[Tuple[int, int, int, int, int], int], characters: Dict[Tuple[int, int, int, int, int], int]) -> None:
+def savePlayerActions(cursor: sqlite3.Cursor, gameID: int, playerPos: int, history: List[Move],
+                      cards: Dict[Tuple[int, int, int, int, int], int],
+                      characters: Dict[Tuple[int, int, int, int, int], int],
+                      board_states: List[Board]) -> None:
     colnames = getColNames(cursor, "Action")[1:]
     sqlInsert = "INSERT INTO Action (" + ", ".join(colnames) + ") VALUES (" + ", ".join(['?']*len(colnames)) + ")"
     for turn, a in enumerate(history):
         if a.actionType in [BUILD, RESERVE]:
             take = [None] * 6 if a.actionType == BUILD else TAKEONEGOLD
             give = [None] * 6
-            cardID = cards[tuple(a.action.cost)] #will fail if someone reserve a top deck
+            # Get actual card object for both visible and top-deck reserves
+            if a.actionType == RESERVE and isinstance(a.action, int):
+                # Top-deck reserve: a.action is deck level (0, 1, or 2)
+                # The card is drawn from the top of the deck and becomes visible only to this player
+                # Get card from the deck BEFORE it was removed (board_states[turn] = state before action)
+                board = board_states[turn]
+                if a.action < len(board.decks) and len(board.decks[a.action]) > 0:
+                    card = board.decks[a.action][0]  # Top card of the specified deck level
+                    cardID = cards[tuple(card.cost)]
+                else:
+                    # Deck empty - shouldn't happen, but handle gracefully
+                    cardID = None
+            else:
+                # Visible card reserve or build: a.action is already a Card object
+                cardID = cards[tuple(a.action.cost)]
             characterID = characters[tuple(a.character.cost)] if a.character else None
         else:
             take = a.action
@@ -143,7 +160,7 @@ def saveIntoBdd(state: Board, winner: int, historyState: List[Any], historyPlaye
         savePlayerState(cursor, gameID, i, h, board_states, historyActionPlayers, cards)
     # insert actions of players
     for i, ha in enumerate(historyActionPlayers):
-        savePlayerActions(cursor, gameID, i, ha, cards, characters)
+        savePlayerActions(cursor, gameID, i, ha, cards, characters, board_states)
     # only one commit at the very end, because there's only one connection at the same time for my db, therefor no concurrent access so I don't care
     conn.commit()
     conn.close()
