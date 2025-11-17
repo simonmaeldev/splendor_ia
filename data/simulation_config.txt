@@ -5,10 +5,10 @@
 # Test configuration (small numbers for testing)
 
 # 5000 games for 2 players gave 582,240 actions
-2: 5000
+2: 2865
 
 # to get the same number with 3 player games, we need ~2,376 games, based on the average of 245.1 actions per game
-3: 2376
+3: 1360
 
 # to get the same number with 4 player games, we need ~1400 games, based on the average of 416.2 actions per game
-4: 1401
+4: 800
