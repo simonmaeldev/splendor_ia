@@ -409,13 +409,15 @@ def encode_action_from_move(move, board) -> Dict[str, Any]:
                 card_reservation = pos  # integer
 
     # Gem take 3 - integers (0 or 1)
+    # Use same logic as action_type determination: if no 2s, it's a "take 3 tokens" intent
     gem_take_3 = [float('nan')] * 5
-    if action_type == TOKENS and sum(take_tokens[:5]) == 3:
+    if action_type == TOKENS and not any(t == 2 for t in take_tokens[:5]):
         gem_take_3 = [take_tokens[i] for i in range(5)]
 
     # Gem take 2 - integers (0 or 2)
+    # Use same logic as action_type determination: if contains a 2, it's "take 2 tokens"
     gem_take_2 = [float('nan')] * 5
-    if action_type == TOKENS and sum(take_tokens[:5]) == 2:
+    if action_type == TOKENS and any(t == 2 for t in take_tokens[:5]):
         gem_take_2 = [take_tokens[i] for i in range(5)]
 
     # Noble selection - integer (-1 or 0-4)
