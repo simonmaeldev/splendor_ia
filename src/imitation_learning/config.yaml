@@ -1,0 +1,62 @@
+# Splendor Imitation Learning Configuration
+# Default configuration for medium-sized architecture
+
+# Random seed for reproducibility
+seed: 42
+
+# Data paths and split configuration
+data:
+  data_root: "data/games"  # Root directory containing 2_games/, 3_games/, 4_games/
+  processed_dir: "data/processed"  # Where to save preprocessed arrays
+  train_ratio: 0.8  # 80% training
+  val_ratio: 0.1    # 10% validation
+  test_ratio: 0.1   # 10% test
+
+# Model architecture configuration
+model:
+  input_dim: null  # Will be calculated during preprocessing after one-hot encoding
+  trunk_dims: [512, 256]  # Shared trunk: 512 -> 256
+  head_dims: [128, 64]    # Each head: trunk_output -> 128 -> 64 -> num_classes
+  dropout: 0.3  # Dropout rate for regularization
+
+  # Number of output classes for each prediction head
+  num_classes:
+    action_type: 4        # build=0, reserve=1, take2=2, take3=3
+    card_selection: 15    # Card positions 0-14
+    card_reservation: 15  # Card positions 0-14
+    gem_take3: 26        # All combinations of 0-3 gems from 5 colors
+    gem_take2: 5         # Which color: white=0, blue=1, green=2, red=3, black=4
+    noble: 5             # Noble positions 0-4
+    gems_removed: 84     # All combinations of removing 0-3 gems from 6 types
+
+# Training hyperparameters
+training:
+  batch_size: 256
+  learning_rate: 0.001
+  epochs: 50
+  patience: 10  # Early stopping patience
+  use_class_weights: false  # Enable if severe class imbalance observed
+  gradient_clip_norm: null  # Optional: clip gradients to prevent explosion (e.g., 1.0)
+  scheduler:
+    enabled: true
+    mode: "min"  # Minimize validation loss
+    factor: 0.5  # Reduce LR by half
+    patience: 5  # After 5 epochs without improvement
+
+# Compute configuration
+compute:
+  device: "cuda"  # Use "cpu" if GPU not available
+  num_workers: 4  # DataLoader workers for parallel data loading
+
+# Logging configuration
+logging:
+  wandb_project: "splendor-ia"
+  wandb_entity: null  # Set to your wandb username if needed
+  log_interval: 1  # Log metrics every N epochs
+  save_plots: true  # Save training curves and confusion matrices
+
+# Checkpointing configuration
+checkpointing:
+  save_dir: "data/models"
+  save_every: 5  # Save checkpoint every N epochs
+  keep_best_only: false  # If true, only keep best model, else keep all checkpoints

@@ -1,0 +1,53 @@
+# Large Architecture Configuration
+# Use if underfitting with medium architecture
+
+seed: 42
+
+data:
+  data_root: "data/games"
+  processed_dir: "data/processed"
+  train_ratio: 0.8
+  val_ratio: 0.1
+  test_ratio: 0.1
+
+model:
+  input_dim: null
+  trunk_dims: [512, 512, 256]  # Deeper trunk with 3 layers
+  head_dims: [128, 128, 64]    # Deeper heads with 3 layers
+  dropout: 0.3
+  num_classes:
+    action_type: 4
+    card_selection: 15
+    card_reservation: 15
+    gem_take3: 26
+    gem_take2: 5
+    noble: 5
+    gems_removed: 84
+
+training:
+  batch_size: 256
+  learning_rate: 0.001
+  epochs: 50
+  patience: 10
+  use_class_weights: false
+  gradient_clip_norm: 1.0  # Gradient clipping for deeper network
+  scheduler:
+    enabled: true
+    mode: "min"
+    factor: 0.5
+    patience: 5
+
+compute:
+  device: "cuda"
+  num_workers: 4
+
+logging:
+  wandb_project: "splendor-ia"
+  wandb_entity: null
+  log_interval: 1
+  save_plots: true
+
+checkpointing:
+  save_dir: "data/models"
+  save_every: 5
+  keep_best_only: false
