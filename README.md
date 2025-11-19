@@ -87,11 +87,11 @@ The ISMCTS implementation uses the following hyperparameters:
 
 ## Dataset Statistics
 
-The current dataset contains **1,743,688 game state/action pairs** collected from MCTS self-play games:
+The current dataset contains **547,221 game state/action pairs** collected from MCTS self-play games:
 
-- **2 players**: 582,240 actions
-- **3 players**: 581,688 actions
-- **4 players**: 579,760 actions
+- **2 players**: 203,567 actions
+- **3 players**: 167,195 actions
+- **4 players**: 176,459 actions
 
 **Total computation time**: 126 hours (5.25 days) on an Intel Core i9-13900KF processor.
 
