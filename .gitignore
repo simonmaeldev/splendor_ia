@@ -136,3 +136,6 @@ data/games/all_games.csv
 data/games/2_games/*.csv
 data/games/3_games/*.csv
 data/games/4_games/*.csv
+data/games/2_games/*.csv.backup
+data/games/3_games/*.csv.backup
+data/games/4_games/*.csv.backup
