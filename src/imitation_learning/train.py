@@ -517,8 +517,7 @@ def main():
             optimizer,
             mode=config['training']['scheduler']['mode'],
             factor=config['training']['scheduler']['factor'],
-            patience=config['training']['scheduler']['patience'],
-            verbose=True
+            patience=config['training']['scheduler']['patience']
         )
 
     # Initialize wandb
