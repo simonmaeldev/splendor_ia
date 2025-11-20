@@ -206,7 +206,7 @@ def encode_gem_take2(row: pd.Series) -> int:
 
     for idx, color in enumerate(colors):
         col_name = f'gem_take2_{color}'
-        if row[col_name] == 1:
+        if row[col_name] == 2:
             return idx
 
     # If no gem selected, return -1
