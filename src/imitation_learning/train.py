@@ -206,7 +206,7 @@ def train_one_epoch(
     device: torch.device,
     class_weights: Optional[Dict[str, torch.Tensor]] = None,
     gradient_clip_norm: Optional[float] = None
-) -> Tuple[float, Dict[str, float]]:
+) -> Tuple[float, Dict[str, float], Dict[str, float]]:
     """
     Train model for one epoch.
 
@@ -219,13 +219,14 @@ def train_one_epoch(
         gradient_clip_norm: Optional gradient clipping value
 
     Returns:
-        Tuple of (average_total_loss, dict_of_average_per_head_losses)
+        Tuple[float, Dict[str, float], Dict[str, float]]: Tuple of (average_total_loss, dict_of_average_per_head_losses, dict_of_per_head_accuracies)
     """
     model.train()
 
     total_loss_accum = 0.0
     losses_accum = {name: 0.0 for name in ['action_type', 'card_selection', 'card_reservation',
                                             'gem_take3', 'gem_take2', 'noble', 'gems_removed']}
+    accuracies_accum = {name: [] for name in losses_accum.keys()}
     num_batches = 0
 
     pbar = tqdm(dataloader, desc='Training', leave=False)
@@ -258,16 +259,91 @@ def train_one_epoch(
         total_loss_accum += total_loss.item()
         for name, loss_val in per_head_losses.items():
             losses_accum[name] += loss_val
+
+        # Compute accuracies
+        action_types = labels['action_type'].cpu().numpy()
+
+        # Action type accuracy (always compute)
+        action_type_preds = outputs['action_type'].argmax(dim=1).cpu().numpy()
+        accuracies_accum['action_type'].append(compute_accuracy(action_type_preds, action_types))
+
+        # Card selection accuracy (only for BUILD actions)
+        build_mask = action_types == 0
+        card_sel_labels = labels['card_selection'].cpu().numpy()
+        card_sel_valid = card_sel_labels != -1
+        card_sel_mask = build_mask & card_sel_valid
+        if card_sel_mask.any():
+            card_sel_preds = outputs['card_selection'].argmax(dim=1).cpu().numpy()
+            accuracies_accum['card_selection'].append(
+                compute_accuracy(card_sel_preds, card_sel_labels, card_sel_mask)
+            )
+
+        # Card reservation accuracy (only for RESERVE actions)
+        reserve_mask = action_types == 1
+        card_res_labels = labels['card_reservation'].cpu().numpy()
+        card_res_valid = card_res_labels != -1
+        card_res_mask = reserve_mask & card_res_valid
+        if card_res_mask.any():
+            card_res_preds = outputs['card_reservation'].argmax(dim=1).cpu().numpy()
+            accuracies_accum['card_reservation'].append(
+                compute_accuracy(card_res_preds, card_res_labels, card_res_mask)
+            )
+
+        # Gem take3 accuracy
+        take3_mask = action_types == 3
+        gem3_labels = labels['gem_take3'].cpu().numpy()
+        gem3_valid = gem3_labels != -1
+        gem3_mask = take3_mask & gem3_valid
+        if gem3_mask.any():
+            gem3_preds = outputs['gem_take3'].argmax(dim=1).cpu().numpy()
+            accuracies_accum['gem_take3'].append(
+                compute_accuracy(gem3_preds, gem3_labels, gem3_mask)
+            )
+
+        # Gem take2 accuracy
+        take2_mask = action_types == 2
+        gem2_labels = labels['gem_take2'].cpu().numpy()
+        gem2_valid = gem2_labels != -1
+        gem2_mask = take2_mask & gem2_valid
+        if gem2_mask.any():
+            gem2_preds = outputs['gem_take2'].argmax(dim=1).cpu().numpy()
+            accuracies_accum['gem_take2'].append(
+                compute_accuracy(gem2_preds, gem2_labels, gem2_mask)
+            )
+
+        # Noble accuracy
+        noble_labels = labels['noble'].cpu().numpy()
+        noble_valid = noble_labels != -1
+        noble_mask = build_mask & noble_valid
+        if noble_mask.any():
+            noble_preds = outputs['noble'].argmax(dim=1).cpu().numpy()
+            accuracies_accum['noble'].append(
+                compute_accuracy(noble_preds, noble_labels, noble_mask)
+            )
+
+        # Gems removed accuracy
+        gems_rem_labels = labels['gems_removed'].cpu().numpy()
+        gems_rem_mask = gems_rem_labels != 0
+        if gems_rem_mask.any():
+            gems_rem_preds = outputs['gems_removed'].argmax(dim=1).cpu().numpy()
+            accuracies_accum['gems_removed'].append(
+                compute_accuracy(gems_rem_preds, gems_rem_labels, gems_rem_mask)
+            )
+
         num_batches += 1
 
         # Update progress bar
         pbar.set_postfix({'loss': f'{total_loss.item():.4f}'})
 
-    # Average losses
+    # Average losses and accuracies
     avg_total_loss = total_loss_accum / num_batches
     avg_per_head_losses = {k: v / num_batches for k, v in losses_accum.items()}
+    avg_per_head_accuracies = {
+        k: np.mean(v) if v else 0.0
+        for k, v in accuracies_accum.items()
+    }
 
-    return avg_total_loss, avg_per_head_losses
+    return avg_total_loss, avg_per_head_losses, avg_per_head_accuracies
 
 
 def validate(
@@ -552,7 +628,7 @@ def main():
         print(f"\nEpoch {epoch+1}/{config['training']['epochs']}")
 
         # Train
-        train_loss, train_per_head_losses = train_one_epoch(
+        train_loss, train_per_head_losses, train_per_head_accs = train_one_epoch(
             model, train_loader, optimizer, device,
             gradient_clip_norm=config['training'].get('gradient_clip_norm')
         )
@@ -569,11 +645,12 @@ def main():
         # Log to wandb
         wandb.log({
             'epoch': epoch + 1,
-            'train_loss': train_loss,
-            'val_loss': val_loss,
-            **{f'train_loss_{k}': v for k, v in train_per_head_losses.items()},
-            **{f'val_loss_{k}': v for k, v in val_per_head_losses.items()},
-            **{f'val_acc_{k}': v for k, v in val_per_head_accs.items()},
+            'loss_train_total': train_loss,
+            'loss_val_total': val_loss,
+            **{f'loss_train_{k}': v for k, v in train_per_head_losses.items()},
+            **{f'loss_val_{k}': v for k, v in val_per_head_losses.items()},
+            **{f'acc_train_{k}': v for k, v in train_per_head_accs.items()},
+            **{f'acc_val_{k}': v for k, v in val_per_head_accs.items()},
             'learning_rate': optimizer.param_groups[0]['lr']
         })
 
