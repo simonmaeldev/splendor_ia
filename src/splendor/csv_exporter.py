@@ -22,10 +22,10 @@ import csv
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple, Any
 from copy import deepcopy
-import math
 
 # Import game constants
 from splendor.constants import WHITE, BLUE, GREEN, RED, BLACK, GOLD, BUILD, RESERVE, TOKENS
+from splendor.board import Board
 
 # Constants matching export_ml_dataset.py
 COLOR_ORDER = [WHITE, BLUE, GREEN, RED, BLACK, GOLD]
@@ -300,7 +300,7 @@ def encode_game_state_from_board(board, action_turn_num: int) -> List:
     return features
 
 
-def find_card_position_in_visible(card, board) -> Optional[int]:
+def find_card_position_in_visible(card, board: Board) -> Optional[int]:
     """
     Find position of card in visible cards [0-11].
 

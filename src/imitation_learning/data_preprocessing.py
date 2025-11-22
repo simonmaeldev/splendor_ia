@@ -26,8 +26,10 @@ from .utils import (
     encode_gem_take2,
     encode_gem_take3,
     encode_gems_removed,
+    generate_all_masks_from_row,
     generate_gem_removal_classes,
     generate_gem_take3_classes,
+    get_num_gem_removal_classes,
     set_seed,
 )
 
@@ -39,11 +41,43 @@ def load_config(config_path: str) -> Dict:
     return config
 
 
-def load_all_games(data_root: str) -> pd.DataFrame:
+def load_single_game(csv_path: str) -> pd.DataFrame:
+    """Load a single game CSV file.
+
+    Args:
+        csv_path: Path to CSV file
+
+    Returns:
+        Dataframe with game_id column added
+
+    Example:
+        >>> df = load_single_game("data/games/3_games/5444.csv")
+        >>> print(f"Loaded {len(df)} samples")
+    """
+    print(f"\nLoading single CSV file: {csv_path}...")
+
+    csv_file = Path(csv_path)
+    if not csv_file.exists():
+        raise ValueError(f"File not found: {csv_path}")
+
+    df = pd.read_csv(csv_file)
+
+    # Extract game_id from filename (e.g., "5444.csv" -> 5444)
+    game_id = int(csv_file.stem)
+    df["game_id"] = game_id
+
+    print(f"Total samples loaded: {len(df)}")
+    print(f"Game ID: {game_id}")
+
+    return df
+
+
+def load_all_games(data_root: str, max_games: int = None) -> pd.DataFrame:
     """Load all game CSVs from 2_games/, 3_games/, and 4_games/ directories.
 
     Args:
         data_root: Root directory containing game subdirectories
+        max_games: Optional limit on number of games to load (for testing)
 
     Returns:
         Concatenated dataframe with game_id column added
@@ -54,14 +88,24 @@ def load_all_games(data_root: str) -> pd.DataFrame:
 
     """
     all_dfs = []
+    total_loaded = 0
 
     for subdir in ["2_games", "3_games", "4_games"]:
+        if max_games is not None and total_loaded >= max_games:
+            break
+
         dir_path = Path(data_root) / subdir
         if not dir_path.exists():
             print(f"Warning: {dir_path} does not exist, skipping...")
             continue
 
         csv_files = list(dir_path.glob("*.csv"))
+
+        # Limit files if max_games specified
+        if max_games is not None:
+            remaining = max_games - total_loaded
+            csv_files = csv_files[:remaining]
+
         print(f"\nLoading {len(csv_files)} CSV files from {subdir}...")
 
         for csv_file in tqdm(csv_files, desc=f"Loading {subdir}"):
@@ -73,6 +117,10 @@ def load_all_games(data_root: str) -> pd.DataFrame:
                 df["game_id"] = game_id
 
                 all_dfs.append(df)
+                total_loaded += 1
+
+                if max_games is not None and total_loaded >= max_games:
+                    break
 
             except Exception as e:
                 print(f"Error loading {csv_file}: {e}")
@@ -84,15 +132,50 @@ def load_all_games(data_root: str) -> pd.DataFrame:
     # Concatenate all dataframes
     combined_df = pd.concat(all_dfs, ignore_index=True)
 
-    # Handle missing values (structured padding for fewer players/nobles)
-    print(f"\nBefore fillna: {combined_df.isna().sum().sum()} NaN values")
-    combined_df = combined_df.fillna(0)
-    print(f"After fillna: {combined_df.isna().sum().sum()} NaN values")
+    # NOTE: Do NOT fill NaN here! The mask generation needs the original NaN values
+    # to correctly reconstruct the game state. Filling NaN with 0 adds phantom nobles,
+    # reserved cards, etc. that change what moves are legal.
+    #
+    # fillna will be done AFTER mask generation in main()
 
     print(f"\nTotal samples loaded: {len(combined_df):,}")
     print(f"Total games loaded: {combined_df['game_id'].nunique():,}")
 
     return combined_df
+
+
+def fill_nan_values(df: pd.DataFrame) -> pd.DataFrame:
+    """Fill NaN values in feature columns (but keep label columns as NaN).
+
+    This MUST be called AFTER mask generation, since masks need the original
+    NaN values to correctly reconstruct game state.
+
+    Args:
+        df: DataFrame with NaN values
+
+    Returns:
+        DataFrame with NaN filled for feature columns only
+    """
+    print(f"\nFilling NaN values...")
+    print(f"  Before fillna: {df.isna().sum().sum()} NaN values")
+
+    # Label columns that should keep NaN (will be converted to -1 later)
+    label_cols_to_keep_nan = [
+        'card_selection', 'card_reservation', 'noble_selection',
+        'gem_take3_white', 'gem_take3_blue', 'gem_take3_green', 'gem_take3_red', 'gem_take3_black',
+        'gem_take2_white', 'gem_take2_blue', 'gem_take2_green', 'gem_take2_red', 'gem_take2_black',
+        'gems_removed_white', 'gems_removed_blue', 'gems_removed_green', 'gems_removed_red', 'gems_removed_black', 'gems_removed_gold',
+    ]
+
+    # Fill NaN for non-label columns (structured padding for fewer players/nobles)
+    df_filled = df.copy()
+    for col in df_filled.columns:
+        if col not in label_cols_to_keep_nan and col != 'action_type':
+            df_filled[col] = df_filled[col].fillna(0)
+
+    print(f"  After fillna: {df_filled.isna().sum().sum()} NaN values (label columns only)")
+
+    return df_filled
 
 
 def identify_column_groups(df: pd.DataFrame) -> Tuple[List[str], List[str], List[str]]:
@@ -320,6 +403,80 @@ def encode_labels(df: pd.DataFrame, label_cols: List[str]) -> Dict[str, np.ndarr
     return labels
 
 
+def generate_masks_for_dataframe(df: pd.DataFrame) -> Dict[str, np.ndarray]:
+    """
+    Generate legal action masks for all rows in the dataframe.
+
+    For each row, reconstructs the board state and generates masks indicating
+    which actions are legal for each prediction head.
+
+    Args:
+        df: DataFrame with all game data
+
+    Returns:
+        Dict mapping head name to mask array of shape (n_samples, n_classes_for_head)
+        Keys: {action_type, card_selection, card_reservation, gem_take3, gem_take2, noble, gems_removed}
+
+    Example:
+        >>> masks = generate_masks_for_dataframe(df)
+        >>> masks['action_type'].shape  # (n_samples, 4)
+        >>> masks['card_selection'].shape  # (n_samples, 15)
+    """
+    print("\nGenerating legal action masks...")
+    print("  This may take 20-40 minutes for ~1.7M samples...")
+
+    # Initialize lists for each head
+    head_names = ['action_type', 'card_selection', 'card_reservation',
+                  'gem_take3', 'gem_take2', 'noble', 'gems_removed']
+    masks_per_head = {head: [] for head in head_names}
+
+    # Track failures
+    failure_count = 0
+
+    # Iterate through rows with progress bar
+    for idx, row in tqdm(df.iterrows(), total=len(df), desc="Generating masks"):
+        # Convert row to dictionary
+        row_dict = row.to_dict()
+
+        # Generate masks for this row
+        try:
+            masks = generate_all_masks_from_row(row_dict)
+
+            # Append to lists
+            for head in head_names:
+                masks_per_head[head].append(masks[head])
+
+        except Exception as e:
+            # This should be caught by generate_all_masks_from_row, but double-check
+            failure_count += 1
+            game_id = row.get('game_id', 'unknown')
+            turn_num = row.get('turn_number', 'unknown')
+            print(f"\nERROR: Mask generation failed for game_id={game_id}, turn={turn_num}: {e}")
+
+            # Use all-ones fallback
+            masks_per_head['action_type'].append(np.ones(4, dtype=np.int8))
+            masks_per_head['card_selection'].append(np.ones(15, dtype=np.int8))
+            masks_per_head['card_reservation'].append(np.ones(15, dtype=np.int8))
+            masks_per_head['gem_take3'].append(np.ones(26, dtype=np.int8))
+            masks_per_head['gem_take2'].append(np.ones(5, dtype=np.int8))
+            masks_per_head['noble'].append(np.ones(5, dtype=np.int8))
+            masks_per_head['gems_removed'].append(np.ones(get_num_gem_removal_classes(), dtype=np.int8))
+
+    # Convert lists to numpy arrays
+    masks_dict = {}
+    for head in head_names:
+        masks_dict[head] = np.stack(masks_per_head[head], axis=0)
+        print(f"  {head}: {masks_dict[head].shape}")
+
+    if failure_count > 0:
+        print(f"\n  WARNING: {failure_count} mask generation failures ({failure_count/len(df)*100:.2f}%)")
+        print(f"  Failed samples use all-ones masks (allow all actions)")
+
+    print(f"\n  Successfully generated masks for {len(df):,} samples")
+
+    return masks_dict
+
+
 def split_by_game_id(
     df: pd.DataFrame,
     train_ratio: float,
@@ -456,6 +613,9 @@ def save_preprocessed_data(
     labels_train: Dict[str, np.ndarray],
     labels_val: Dict[str, np.ndarray],
     labels_test: Dict[str, np.ndarray],
+    masks_train: Dict[str, np.ndarray],
+    masks_val: Dict[str, np.ndarray],
+    masks_test: Dict[str, np.ndarray],
     scaler: StandardScaler,
     feature_cols: List[str],
     label_mappings: Dict,
@@ -466,6 +626,7 @@ def save_preprocessed_data(
     Args:
         X_train, X_val, X_test: Feature arrays
         labels_train, labels_val, labels_test: Label dicts
+        masks_train, masks_val, masks_test: Mask dicts
         scaler: Fitted StandardScaler
         feature_cols: List of feature column names
         label_mappings: Dict of encoding mappings
@@ -488,6 +649,12 @@ def save_preprocessed_data(
     np.savez(os.path.join(output_dir, "labels_test.npz"), **labels_test)
     print(f"  Saved label arrays: {len(labels_train)} heads")
 
+    # Save mask arrays
+    np.savez(os.path.join(output_dir, "masks_train.npz"), **masks_train)
+    np.savez(os.path.join(output_dir, "masks_val.npz"), **masks_val)
+    np.savez(os.path.join(output_dir, "masks_test.npz"), **masks_test)
+    print(f"  Saved mask arrays: {len(masks_train)} heads")
+
     # Save scaler
     with open(os.path.join(output_dir, "scaler.pkl"), "wb") as f:
         pickle.dump(scaler, f)
@@ -503,6 +670,21 @@ def save_preprocessed_data(
         json.dump(label_mappings, f, indent=2)
     print("  Saved label encoding mappings")
 
+    # Compute mask statistics
+    mask_stats = {}
+    for head in masks_train.keys():
+        train_masks = masks_train[head]
+        # Average number of legal actions per sample
+        avg_legal = float(np.mean(np.sum(train_masks, axis=1)))
+        min_legal = int(np.min(np.sum(train_masks, axis=1)))
+        max_legal = int(np.max(np.sum(train_masks, axis=1)))
+
+        mask_stats[head] = {
+            "avg_legal_actions": avg_legal,
+            "min_legal_actions": min_legal,
+            "max_legal_actions": max_legal,
+        }
+
     # Save preprocessing statistics
     stats = {
         "total_samples": int(len(X_train) + len(X_val) + len(X_test)),
@@ -516,11 +698,164 @@ def save_preprocessed_data(
             "val": labels_val["action_type"].tolist(),
             "test": labels_test["action_type"].tolist(),
         },
+        "mask_statistics": mask_stats,
     }
 
     with open(os.path.join(output_dir, "preprocessing_stats.json"), "w") as f:
         json.dump(stats, f, indent=2)
     print(f"  Saved preprocessing statistics (input_dim={stats['input_dim']})")
+    print(f"\n  Mask statistics:")
+    for head, stats_head in mask_stats.items():
+        print(f"    {head}: avg={stats_head['avg_legal_actions']:.1f}, min={stats_head['min_legal_actions']}, max={stats_head['max_legal_actions']}")
+
+
+def validate_masks(
+    masks: Dict[str, np.ndarray],
+    labels: Dict[str, np.ndarray],
+    df: pd.DataFrame,
+) -> Dict[str, any]:
+    """
+    Validate that masks are correct and labeled actions are legal.
+
+    Critical validation: 100% of labeled actions MUST be legal.
+    Any failures indicate data issues or reconstruction bugs.
+
+    Args:
+        masks: Dict mapping head name to mask array (n_samples, n_classes)
+        labels: Dict mapping head name to label array (n_samples,)
+        df: DataFrame with game_id and turn_number for failure reporting
+
+    Returns:
+        Dict with validation results and statistics
+
+    Raises:
+        Warning if any validation failures occur
+    """
+    print("\nValidating masks...")
+
+    expected_shapes = {
+        'action_type': 4,
+        'card_selection': 15,
+        'card_reservation': 15,
+        'gem_take3': 26,
+        'gem_take2': 5,
+        'noble': 5,
+        'gems_removed': get_num_gem_removal_classes(),
+    }
+
+    validation_report = {}
+    failures = []
+
+    for head in expected_shapes.keys():
+        if head not in masks:
+            print(f"  ERROR: Missing mask for head '{head}'")
+            continue
+
+        mask = masks[head]
+        label = labels[head]
+        expected_classes = expected_shapes[head]
+
+        print(f"\n  Validating {head}...")
+
+        # Check shape
+        if mask.shape != (len(label), expected_classes):
+            print(f"    ERROR: Shape mismatch. Expected {(len(label), expected_classes)}, got {mask.shape}")
+            continue
+
+        # Check values are binary
+        unique_vals = np.unique(mask)
+        if not np.all(np.isin(unique_vals, [0, 1])):
+            print(f"    ERROR: Mask contains non-binary values: {unique_vals}")
+            continue
+
+        # Check at least one legal action per sample (for action_type)
+        if head == 'action_type':
+            zero_masks = np.sum(mask, axis=1) == 0
+            if np.any(zero_masks):
+                num_zeros = np.sum(zero_masks)
+                print(f"    ERROR: {num_zeros} samples have no legal actions!")
+                continue
+
+        # Check labeled actions are legal (CRITICAL)
+        # Exclude -1 labels (not applicable)
+        valid_label_mask = label != -1
+        valid_indices = np.where(valid_label_mask)[0]
+
+        if len(valid_indices) > 0:
+            # For each valid label, check if mask[sample_idx, label_value] == 1
+            illegal_count = 0
+            illegal_samples = []
+
+            for idx in valid_indices:
+                label_value = label[idx]
+                is_legal = mask[idx, label_value] == 1
+
+                if not is_legal:
+                    illegal_count += 1
+                    game_id = df.iloc[idx]['game_id']
+                    turn_num = df.iloc[idx]['turn_number']
+                    illegal_samples.append({
+                        'sample_idx': int(idx),
+                        'game_id': int(game_id),
+                        'turn_number': int(turn_num),
+                        'label_value': int(label_value),
+                        'head': head,
+                    })
+
+            legal_rate = (len(valid_indices) - illegal_count) / len(valid_indices) * 100
+
+            print(f"    Labeled actions legal: {len(valid_indices) - illegal_count}/{len(valid_indices)} ({legal_rate:.2f}%)")
+
+            if illegal_count > 0:
+                print(f"    ❌ WARNING: {illegal_count} labeled actions are ILLEGAL!")
+                failures.extend(illegal_samples)
+        else:
+            print(f"    No valid labels to check (all -1)")
+
+        # Compute statistics
+        avg_legal = np.mean(np.sum(mask, axis=1))
+        min_legal = np.min(np.sum(mask, axis=1))
+        max_legal = np.max(np.sum(mask, axis=1))
+
+        validation_report[head] = {
+            'shape_valid': bool(mask.shape == (len(label), expected_classes)),
+            'binary_values': bool(np.all(np.isin(unique_vals, [0, 1]))),
+            'avg_legal_actions': float(avg_legal),
+            'min_legal_actions': int(min_legal),
+            'max_legal_actions': int(max_legal),
+            'illegal_count': int(illegal_count if len(valid_indices) > 0 else 0),
+            'valid_labels_count': int(len(valid_indices)),
+            'legal_rate': float(legal_rate if len(valid_indices) > 0 else 100.0),
+        }
+
+        print(f"    Shape: {mask.shape} ✓")
+        print(f"    Binary values: ✓")
+        print(f"    Avg legal actions: {avg_legal:.1f}")
+        print(f"    Min/Max legal: {min_legal}/{max_legal}")
+
+    # Report overall results
+    total_failures = len(failures)
+    if total_failures > 0:
+        print(f"\n❌ VALIDATION FAILED: {total_failures} labeled actions are illegal!")
+        print(f"   This indicates data quality issues or reconstruction bugs.")
+        print(f"   First 10 failures:")
+        for failure in failures[:10]:
+            print(f"     Game {failure['game_id']}, Turn {failure['turn_number']}, "
+                  f"Head '{failure['head']}', Label {failure['label_value']}")
+
+        # Save failure details
+        with open("data/processed/mask_validation_failures.json", "w") as f:
+            json.dump(failures, f, indent=2)
+        print(f"\n   Full failure list saved to: data/processed/mask_validation_failures.json")
+
+        validation_report['overall_status'] = 'FAILED'
+        validation_report['total_failures'] = total_failures
+    else:
+        print(f"\n✓ Mask validation PASSED! All labeled actions are legal.")
+        validation_report['overall_status'] = 'PASSED'
+        validation_report['total_failures'] = 0
+
+    return validation_report
 
 
 def main():
@@ -530,6 +865,12 @@ def main():
     )
     parser.add_argument(
         "--config", type=str, default="config.yaml", help="Path to config file",
+    )
+    parser.add_argument(
+        "--max-games", type=int, default=None, help="Maximum number of games to load (for testing)",
+    )
+    parser.add_argument(
+        "--single-file", type=str, default=None, help="Process only a single CSV file (for debugging)",
     )
     args = parser.parse_args()
 
@@ -541,19 +882,33 @@ def main():
     set_seed(config["seed"])
     print(f"Set random seed: {config['seed']}")
 
-    # Load all game data
-    df = load_all_games(config["data"]["data_root"])
+    # Load game data (with NaN values preserved!)
+    if args.single_file:
+        print(f"\n⚠️  DEBUG MODE: Processing single file")
+        df = load_single_game(args.single_file)
+    elif args.max_games:
+        print(f"\n⚠️  TEST MODE: Loading only {args.max_games} games")
+        df = load_all_games(config["data"]["data_root"], max_games=args.max_games)
+    else:
+        df = load_all_games(config["data"]["data_root"])
+
+    # Generate masks BEFORE filling NaN (masks need original game state)
+    # This is critical: fillna adds phantom nobles/cards that change legal moves
+    masks_all = generate_masks_for_dataframe(df)
+
+    # Now fill NaN for feature engineering
+    df_filled = fill_nan_values(df)
 
     # Identify column groups
-    metadata_cols, label_cols, feature_cols = identify_column_groups(df)
+    metadata_cols, label_cols, feature_cols = identify_column_groups(df_filled)
 
     # Engineer features (one-hot encoding)
-    df_eng, feature_cols_eng, onehot_cols = engineer_features(df, feature_cols)
+    df_eng, feature_cols_eng, onehot_cols = engineer_features(df_filled, feature_cols)
 
     # Create normalization mask
     norm_mask = create_normalization_mask(feature_cols_eng, onehot_cols)
 
-    # Encode labels
+    # Encode labels (from filled dataframe)
     labels_all = encode_labels(df_eng, label_cols)
 
     # Split by game_id
@@ -576,6 +931,26 @@ def main():
     labels_train = {k: v[train_idx] for k, v in labels_all.items()}
     labels_val = {k: v[val_idx] for k, v in labels_all.items()}
     labels_test = {k: v[test_idx] for k, v in labels_all.items()}
+
+    # Split masks
+    masks_train = {k: v[train_idx] for k, v in masks_all.items()}
+    masks_val = {k: v[val_idx] for k, v in masks_all.items()}
+    masks_test = {k: v[test_idx] for k, v in masks_all.items()}
+
+    # Reset index for validation DataFrame to match mask/label arrays
+    df_for_validation = df_eng.iloc[train_idx].reset_index(drop=True)
+
+    # Validate masks on training set
+    validation_report = validate_masks(
+        masks_train,
+        labels_train,
+        df_for_validation,
+    )
+
+    # Save validation report
+    with open(os.path.join(config["data"]["processed_dir"], "mask_validation_report.json"), "w") as f:
+        json.dump(validation_report, f, indent=2)
+    print(f"\n  Validation report saved to: {config['data']['processed_dir']}/mask_validation_report.json")
 
     # Normalize features
     X_train_norm, X_val_norm, X_test_norm, scaler = normalize_features(
@@ -608,6 +983,9 @@ def main():
         labels_train,
         labels_val,
         labels_test,
+        masks_train,
+        masks_val,
+        masks_test,
         scaler,
         feature_cols_eng,
         label_mappings,

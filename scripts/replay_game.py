@@ -344,14 +344,19 @@ def render_board_state(state: GameState) -> str:
     lines.append(f"Tokens: {render_tokens(state.board_gems)}")
     lines.append("")
 
-    # Visible cards by level
+    # Visible cards by level - handle variable-length lists
     lines.append(f"{bcolors.BOLD}Visible Cards:{bcolors.RESET}")
+    card_position = 0  # Track position across all visible cards
     for level in range(3):
-        start_idx = level * 4
-        level_cards = state.visible_cards[start_idx:start_idx + 4]
+        # Group cards by level from flat list
+        level_cards = [c for c in state.visible_cards if c and c.level == level + 1]
         lines.append(f"  Level {level + 1} (Deck: {state.deck_remaining[level]} remaining):")
-        for i, card in enumerate(level_cards):
-            lines.append(render_card(card, start_idx + i))
+        for card in level_cards:
+            lines.append(render_card(card, card_position))
+            card_position += 1
+        # If no cards at this level, show that
+        if not level_cards:
+            lines.append(f"  [no cards displayed]")
 
     lines.append("")
     lines.append(f"{bcolors.BOLD}Nobles:{bcolors.RESET}")
@@ -396,8 +401,11 @@ def render_action(action: GameAction, state: GameState) -> str:
     if action.action_type == "build":
         if action.card_selection is not None:
             if action.card_selection < 12:
-                card = state.visible_cards[action.card_selection]
-                lines.append(f"Card: {render_card(card, action.card_selection)}")
+                # Build from visible card - use relative indexing across all visible cards
+                visible_cards = [c for c in state.visible_cards if c is not None]
+                if action.card_selection < len(visible_cards):
+                    card = visible_cards[action.card_selection]
+                    lines.append(f"Card: {render_card(card, action.card_selection)}")
             else:
                 # Built from reserved
                 lines.append(f"Card: From reserved slot {action.card_selection - 12}")
@@ -405,8 +413,11 @@ def render_action(action: GameAction, state: GameState) -> str:
     elif action.action_type == "reserve":
         if action.card_reservation is not None:
             if action.card_reservation < 12:
-                card = state.visible_cards[action.card_reservation]
-                lines.append(f"Card: {render_card(card, action.card_reservation)}")
+                # Reserve from visible card - use relative indexing across all visible cards
+                visible_cards = [c for c in state.visible_cards if c is not None]
+                if action.card_reservation < len(visible_cards):
+                    card = visible_cards[action.card_reservation]
+                    lines.append(f"Card: {render_card(card, action.card_reservation)}")
             else:
                 # Reserved from deck top
                 deck_level = action.card_reservation - 12 + 1

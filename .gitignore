@@ -141,3 +141,4 @@ data/games/3_games/*.csv.backup
 data/games/4_games/*.csv.backup
 
 data/processed/
+.aider*

@@ -34,7 +34,7 @@ from splendor.cards import Card
 from splendor.characters import Character
 from splendor.player import Player
 from splendor.board import Board
-from splendor.constants import WHITE, BLUE, GREEN, RED, BLACK, GOLD
+from splendor.constants import DECK1, DECK2, DECK3
 
 
 def parse_card_features(features: List[float]) -> Optional[Card]:
@@ -76,6 +76,18 @@ def parse_card_features(features: List[float]) -> Optional[Card]:
         if val == 1:
             bonus = i
             break
+
+    # Validate card exists in deck constants
+    # Card signature: [vp, bonus, cost, level]
+    card_signature = [vp, bonus, cost, level]
+    deck = DECK1 if level == 1 else (DECK2 if level == 2 else DECK3)
+
+    # Check if this card exists in the appropriate deck
+    if card_signature not in deck:
+        raise ValueError(
+            f"Invalid card features: vp={vp}, level={level}, bonus={bonus}, cost={cost}. "
+            f"Card does not exist in DECK{level} constants."
+        )
 
     # Create Card object
     card = Card(vp, bonus, cost, level)
@@ -242,7 +254,10 @@ def reconstruct_board_from_csv_row(row: Dict[str, Any]) -> Board:
         board.tokens.append(int(safe_float(row[f'gems_board_{color}'])))
 
     # Reconstruct visible cards (12 cards: 4 per level)
+    # Use variable-length lists matching core Splendor engine behavior
+    # When decks are depleted, lists shrink (no None padding)
     board.displayedCards = [[], [], []]
+
     for card_idx in range(12):
         # Extract 12 features for this card
         features = []
@@ -255,10 +270,10 @@ def reconstruct_board_from_csv_row(row: Dict[str, Any]) -> Board:
 
         card = parse_card_features(features)
 
-        # Determine which level this card belongs to
-        level = card_idx // 4  # 0-3 -> level 0, 4-7 -> level 1, 8-11 -> level 2
-
+        # Only append non-None cards to appropriate level list
+        # Use card's intrinsic level rather than calculating from CSV position
         if card is not None:
+            level = card.lvl - 1  # Card levels are 1-3, convert to 0-2 index
             board.displayedCards[level].append(card)
 
     # Reconstruct deck counts with dummy cards

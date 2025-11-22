@@ -180,7 +180,7 @@ class Board:
         return moves
 
     def getPossibleBuild(self) -> List[Card]:
-        """ return position of all cards the player can build
+        """ return all cards the player can build
         """
         player = self.getCurrentPlayer()
         allVisible = player.getAllVisible(self)

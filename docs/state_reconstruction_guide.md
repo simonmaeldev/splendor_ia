@@ -324,36 +324,87 @@ print(f"Type match: {expected_action.actionType == valid_moves[0].actionType}")
 
 ## Integration with Training Pipeline
 
-### Phase 2: Action Masking (Future Work)
+### Phase 2: Action Masking (IMPLEMENTED)
 
-This module provides the foundation for Phase 2, which will:
+This module provides the foundation for Phase 2, which generates action masks during preprocessing.
 
-1. Use `board.getMoves()` to generate action masks during training
-2. Filter illegal predictions during inference
-3. Implement masked loss functions
-4. Add masking to evaluation metrics
+#### Mask Generation During Preprocessing
 
-Example integration:
+Masks are generated for all samples during the data preprocessing step:
+
+```python
+from imitation_learning.data_preprocessing import generate_masks_for_dataframe
+
+# Generate masks for entire dataframe
+masks_all = generate_masks_for_dataframe(df)
+
+# masks_all contains 7 arrays (one per prediction head):
+# - action_type: (n_samples, 4) - BUILD, RESERVE, TAKE2, TAKE3
+# - card_selection: (n_samples, 15) - which cards can be built
+# - card_reservation: (n_samples, 15) - which cards can be reserved
+# - gem_take3: (n_samples, 26) - which gem combinations for TAKE3
+# - gem_take2: (n_samples, 5) - which colors for TAKE2
+# - noble: (n_samples, 5) - which nobles can be acquired
+# - gems_removed: (n_samples, 84) - which gem removal patterns
+
+# Split masks with same indices as features/labels
+masks_train = {k: v[train_idx] for k, v in masks_all.items()}
+masks_val = {k: v[val_idx] for k, v in masks_all.items()}
+masks_test = {k: v[test_idx] for k, v in masks_all.items()}
+```
+
+#### Loading Masks in Training
+
+```python
+import numpy as np
+
+# Load preprocessed masks
+masks_train = np.load('data/processed/masks_train.npz')
+masks_val = np.load('data/processed/masks_val.npz')
+
+# Access individual head masks
+action_type_masks = masks_train['action_type']  # Shape: (n_samples, 4)
+card_selection_masks = masks_train['card_selection']  # Shape: (n_samples, 15)
+```
+
+#### Applying Masks During Training
 
 ```python
 # In training loop
-for batch in dataloader:
-    features, actions = batch
+for batch_idx, (features, labels, masks) in enumerate(dataloader):
+    # Forward pass
+    logits = model(features)  # Dict with 7 heads
 
-    # Reconstruct boards and generate masks
-    masks = []
-    for row_features in features:
-        board = reconstruct_board_from_features(row_features)
-        valid_moves = board.getMoves()
-        mask = convert_moves_to_mask(valid_moves)
-        masks.append(mask)
+    # Apply masks to logits (set illegal actions to very negative values)
+    masked_logits = {}
+    for head_name in logits.keys():
+        masked_logits[head_name] = logits[head_name] + (1 - masks[head_name]) * -1e9
 
-    # Apply masks to model predictions
-    logits = model(features)
-    masked_logits = logits + (1 - masks) * -1e9  # Mask illegal actions
+    # Compute loss with masked logits
+    # Now the model only considers legal actions
+    loss = compute_loss(masked_logits, labels)
+```
 
-    # Compute loss only on legal actions
-    loss = masked_loss(masked_logits, actions, masks)
+#### Mask Statistics
+
+After preprocessing, check the mask statistics in `preprocessing_stats.json`:
+
+```json
+{
+  "mask_statistics": {
+    "action_type": {
+      "avg_legal_actions": 2.3,
+      "min_legal_actions": 1,
+      "max_legal_actions": 4
+    },
+    "card_selection": {
+      "avg_legal_actions": 3.5,
+      "min_legal_actions": 0,
+      "max_legal_actions": 15
+    }
+    // ... other heads
+  }
+}
 ```
 
 ## Performance Considerations

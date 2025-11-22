@@ -1,0 +1,23 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Debug Preprocessing",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "imitation_learning.data_preprocessing",
+            "args": [
+                "--config",
+                "src/imitation_learning/config.yaml",
+                "--single-file",
+                "data/games/3_games/4049.csv"
+            ],
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
+            },
+            "justMyCode": false
+        }
+    ]
+}

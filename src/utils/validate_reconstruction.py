@@ -78,11 +78,13 @@ def parse_action_from_csv(row: Dict[str, Any], board: Board) -> Move:
             card_idx = int(card_selection)
 
             if card_idx < 12:
-                # Build from visible card
-                level = card_idx // 4  # 0-3 -> level 0, 4-7 -> level 1, 8-11 -> level 2
-                position = card_idx % 4
-                if position < len(board.displayedCards[level]):
-                    action = board.displayedCards[level][position]
+                # Build from visible card - use relative indexing across all visible cards
+                visible_cards = []
+                for level_cards in board.displayedCards:
+                    visible_cards.extend(level_cards)
+
+                if card_idx < len(visible_cards):
+                    action = visible_cards[card_idx]
             else:
                 # Build from reserved card (12-14)
                 reserved_idx = card_idx - 12
@@ -97,11 +99,13 @@ def parse_action_from_csv(row: Dict[str, Any], board: Board) -> Move:
             card_idx = int(card_reservation)
 
             if card_idx < 12:
-                # Reserve from visible card
-                level = card_idx // 4
-                position = card_idx % 4
-                if position < len(board.displayedCards[level]):
-                    action = board.displayedCards[level][position]
+                # Reserve from visible card - use relative indexing across all visible cards
+                visible_cards = []
+                for level_cards in board.displayedCards:
+                    visible_cards.extend(level_cards)
+
+                if card_idx < len(visible_cards):
+                    action = visible_cards[card_idx]
             else:
                 # Reserve from top deck (12-14 maps to deck levels 1-3)
                 deck_level = (card_idx - 12) + 1  # 12->1, 13->2, 14->3

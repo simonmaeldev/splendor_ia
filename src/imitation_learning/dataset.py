@@ -17,19 +17,22 @@ class SplendorDataset(Dataset):
     """
     PyTorch Dataset for Splendor imitation learning.
 
-    Loads preprocessed features and labels, returns them as tensors.
+    Loads preprocessed features, labels, and legal action masks, returns them as tensors.
     All labels are preserved including -1 values which will be masked during training.
+    Masks indicate which actions are legal for each state.
     """
 
-    def __init__(self, X: np.ndarray, labels: Dict[str, np.ndarray]):
+    def __init__(self, X: np.ndarray, labels: Dict[str, np.ndarray], masks: Dict[str, np.ndarray]):
         """
-        Initialize dataset with features and labels.
+        Initialize dataset with features, labels, and masks.
 
         Args:
             X: Feature array of shape (n_samples, input_dim)
             labels: Dict mapping head name to label array of shape (n_samples,)
                    Keys: action_type, card_selection, card_reservation,
                          gem_take3, gem_take2, noble, gems_removed
+            masks: Dict mapping head name to mask array of shape (n_samples, n_classes_for_head)
+                   Binary masks where 1 = legal action, 0 = illegal action
         """
         self.X = torch.from_numpy(X).float()
 
@@ -38,15 +41,22 @@ class SplendorDataset(Dataset):
             for name, arr in labels.items()
         }
 
-        # Verify all labels have same length
+        self.masks = {
+            name: torch.from_numpy(arr).float()
+            for name, arr in masks.items()
+        }
+
+        # Verify all labels and masks have same length
         assert all(len(arr) == len(self.X) for arr in self.labels.values()), \
             "All labels must have same length as features"
+        assert all(len(arr) == len(self.X) for arr in self.masks.values()), \
+            "All masks must have same length as features"
 
     def __len__(self) -> int:
         """Return number of samples in dataset."""
         return len(self.X)
 
-    def __getitem__(self, idx: int) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
+    def __getitem__(self, idx: int) -> Tuple[torch.Tensor, Dict[str, torch.Tensor], Dict[str, torch.Tensor]]:
         """
         Get a single sample.
 
@@ -54,17 +64,23 @@ class SplendorDataset(Dataset):
             idx: Sample index
 
         Returns:
-            Tuple of (state_tensor, labels_dict)
+            Tuple of (state_tensor, labels_dict, masks_dict)
             - state_tensor: float tensor of shape (input_dim,)
             - labels_dict: dict of 7 long tensors (scalar for each head)
+            - masks_dict: dict of 7 float tensors (n_classes_for_head,) with 0/1 values
         """
         state = self.X[idx]
         labels_dict = {name: labels[idx] for name, labels in self.labels.items()}
+        masks_dict = {name: masks[idx] for name, masks in self.masks.items()}
 
-        return state, labels_dict
+        return state, labels_dict, masks_dict
 
 
-def load_preprocessed_data(processed_dir: str) -> Tuple[np.ndarray, np.ndarray, np.ndarray, Dict, Dict, Dict]:
+def load_preprocessed_data(processed_dir: str) -> Tuple[
+    np.ndarray, np.ndarray, np.ndarray,
+    Dict, Dict, Dict,
+    Dict, Dict, Dict
+]:
     """
     Load all preprocessed data from disk.
 
@@ -72,7 +88,8 @@ def load_preprocessed_data(processed_dir: str) -> Tuple[np.ndarray, np.ndarray, 
         processed_dir: Directory containing preprocessed files
 
     Returns:
-        Tuple of (X_train, X_val, X_test, labels_train, labels_val, labels_test)
+        Tuple of (X_train, X_val, X_test, labels_train, labels_val, labels_test,
+                 masks_train, masks_val, masks_test)
     """
     print(f"Loading preprocessed data from {processed_dir}...")
 
@@ -90,7 +107,14 @@ def load_preprocessed_data(processed_dir: str) -> Tuple[np.ndarray, np.ndarray, 
 
     print(f"  Labels: {list(labels_train.keys())}")
 
-    return X_train, X_val, X_test, labels_train, labels_val, labels_test
+    # Load masks
+    masks_train = dict(np.load(os.path.join(processed_dir, 'masks_train.npz')))
+    masks_val = dict(np.load(os.path.join(processed_dir, 'masks_val.npz')))
+    masks_test = dict(np.load(os.path.join(processed_dir, 'masks_test.npz')))
+
+    print(f"  Masks: {list(masks_train.keys())}")
+
+    return X_train, X_val, X_test, labels_train, labels_val, labels_test, masks_train, masks_val, masks_test
 
 
 def create_dataloaders(
@@ -113,18 +137,21 @@ def create_dataloaders(
         >>> train_loader, val_loader, test_loader = create_dataloaders(
         ...     "data/processed", batch_size=256, num_workers=4
         ... )
-        >>> for batch_states, batch_labels in train_loader:
+        >>> for batch_states, batch_labels, batch_masks in train_loader:
         ...     # batch_states: (batch_size, input_dim)
         ...     # batch_labels: dict of 7 tensors, each (batch_size,)
+        ...     # batch_masks: dict of 7 tensors, each (batch_size, n_classes_for_head)
         ...     pass
     """
     # Load preprocessed data
-    X_train, X_val, X_test, labels_train, labels_val, labels_test = load_preprocessed_data(processed_dir)
+    (X_train, X_val, X_test,
+     labels_train, labels_val, labels_test,
+     masks_train, masks_val, masks_test) = load_preprocessed_data(processed_dir)
 
     # Create datasets
-    train_dataset = SplendorDataset(X_train, labels_train)
-    val_dataset = SplendorDataset(X_val, labels_val)
-    test_dataset = SplendorDataset(X_test, labels_test)
+    train_dataset = SplendorDataset(X_train, labels_train, masks_train)
+    val_dataset = SplendorDataset(X_val, labels_val, masks_val)
+    test_dataset = SplendorDataset(X_test, labels_test, masks_test)
 
     # Create dataloaders
     train_loader = DataLoader(
@@ -177,13 +204,17 @@ if __name__ == "__main__":
 
         # Test one batch
         print("\nTesting one batch...")
-        states, labels = next(iter(train_loader))
+        states, labels, masks = next(iter(train_loader))
 
         print(f"  States shape: {states.shape}, dtype: {states.dtype}")
         print(f"  Labels:")
         for name, tensor in labels.items():
             print(f"    {name}: shape={tensor.shape}, dtype={tensor.dtype}, "
                   f"min={tensor.min()}, max={tensor.max()}")
+        print(f"  Masks:")
+        for name, tensor in masks.items():
+            print(f"    {name}: shape={tensor.shape}, dtype={tensor.dtype}, "
+                  f"legal_actions={tensor.sum(dim=1).mean():.1f}")
 
         print("\n✓ Dataset test passed!")
 

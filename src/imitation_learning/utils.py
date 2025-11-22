@@ -24,7 +24,7 @@ from sklearn.metrics import confusion_matrix as sklearn_confusion_matrix
 from splendor.board import Board
 from splendor.constants import BUILD, RESERVE, TOKENS
 from splendor.move import Move
-from spledor.cards import Card
+from splendor.cards import Card
 
 # Add parent directory to path to access utils package
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -575,23 +575,23 @@ def get_mask_from_move_card_selection(
         current_player = board.players[board.currentPlayer]
 
         # Search visible cards (0-11)
-        card_idx = None
-        level = card.lvl
-        for pos, displayed_card in enumerate(board.displayedCards[level]):
-            if displayed_card is card:  # Identity comparison
-                card_idx = level * 4 + pos
-                break
+        # Note: card.lvl is 1, 2, or 3, but displayedCards is indexed [0, 1, 2]
+        card_idx = 0
+        for level in range(3):
+            for displayed_card in board.displayedCards[level]:
+                if displayed_card is card:  # Identity comparison
+                    mask[card_idx] = 1
+                    return
+                else:
+                    card_idx += 1
 
         # Search reserved cards (12-14)
-        if card_idx is None:
-            for reserved_idx, reserved_card in enumerate(current_player.reserved):
-                if reserved_card is card:
-                    card_idx = 12 + reserved_idx
-                    break
+        for reserved_idx, reserved_card in enumerate(current_player.reserved):
+            if reserved_card is card:
+                mask[12 + reserved_idx] = 1
+                return
 
-        if card_idx is not None:
-            mask[card_idx] = 1
-
+        raise ValueError("we did not find the card that the player should build in the cards available to him")
 
 def get_mask_from_move_card_reservation(
     move: Move, board: Board, mask: np.ndarray
@@ -613,16 +613,15 @@ def get_mask_from_move_card_reservation(
         else:
             # Reserve from visible card: action is Card object
             card: Card = action
-            card_idx = None
-
-            # Search visible cards (0-11)
+            card_idx = 0
             for level in range(3):
-                for pos, displayed_card in enumerate(board.displayedCards[level]):
-                    if displayed_card is card:
-                        card_idx = level * 4 + pos
-                        break
-                if card_idx is not None:
-                    break
+                for displayed_card in board.displayedCards[level]:
+                    if displayed_card is card:  # Identity comparison
+                        mask[card_idx] = 1
+                        return
+                    else:
+                        card_idx += 1
+
 
         if card_idx is not None:
             mask[card_idx] = 1
@@ -669,7 +668,7 @@ def get_mask_from_move_gem_take3(
                 mask[class_idx] = 1
 
 
-def get_mask_from_move_gem_take2(move, mask: np.ndarray) -> None:
+def get_mask_from_move_gem_take2(move: Move, mask: np.ndarray) -> None:
     """Update gem_take2 mask for a single move.
 
     Args:
@@ -705,7 +704,7 @@ def get_mask_from_move_noble(move: Move, board: Board, mask: np.ndarray) -> None
 
 
 def get_mask_from_move_gems_removed(
-    move, removal_to_class: Dict[Tuple[int, ...], int], mask: np.ndarray
+        move: Move, removal_to_class: Dict[Tuple[int, ...], int], mask: np.ndarray
 ) -> None:
     """Update gems_removed mask for a single move.
 

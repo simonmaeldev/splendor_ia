@@ -22,6 +22,7 @@ import yaml
 
 from .dataset import create_dataloaders
 from .model import MultiHeadSplendorNet
+from .train import apply_legal_action_mask
 from .utils import (
     compute_accuracy,
     compute_confusion_matrix,
@@ -60,11 +61,14 @@ def evaluate_action_type(
     all_labels = []
 
     with torch.no_grad():
-        for states, labels in tqdm(dataloader, desc='Evaluating action_type'):
+        for states, labels, masks in tqdm(dataloader, desc='Evaluating action_type'):
             states = states.to(device)
+            masks = {k: v.to(device) for k, v in masks.items()}
             outputs = model(states)
 
-            preds = outputs['action_type'].argmax(dim=1).cpu().numpy()
+            # Apply legal action mask to enforce only legal actions
+            action_type_logits = apply_legal_action_mask(outputs['action_type'], masks['action_type'])
+            preds = action_type_logits.argmax(dim=1).cpu().numpy()
             labs = labels['action_type'].cpu().numpy()
 
             all_preds.append(preds)
@@ -123,8 +127,9 @@ def evaluate_conditional_head(
     all_labels = []
 
     with torch.no_grad():
-        for states, labels in tqdm(dataloader, desc=f'Evaluating {head_name}'):
+        for states, labels, legal_masks in tqdm(dataloader, desc=f'Evaluating {head_name}'):
             states = states.to(device)
+            legal_masks = {k: v.to(device) for k, v in legal_masks.items()}
             outputs = model(states)
 
             # Filter by action type
@@ -137,7 +142,9 @@ def evaluate_conditional_head(
             combined_mask = mask & valid_mask
 
             if combined_mask.any():
-                preds = outputs[head_name].argmax(dim=1).cpu().numpy()
+                # Apply legal action mask to enforce only legal actions
+                head_logits = apply_legal_action_mask(outputs[head_name], legal_masks[head_name])
+                preds = head_logits.argmax(dim=1).cpu().numpy()
                 all_preds.append(preds[combined_mask])
                 all_labels.append(head_labels[combined_mask])
 
@@ -184,13 +191,22 @@ def evaluate_overall_action_accuracy(
     total = 0
 
     with torch.no_grad():
-        for states, labels in tqdm(dataloader, desc='Computing overall accuracy'):
+        for states, labels, legal_masks in tqdm(dataloader, desc='Computing overall accuracy'):
             states = states.to(device)
+            legal_masks = {k: v.to(device) for k, v in legal_masks.items()}
             outputs = model(states)
+
+            # Apply legal action masks to all heads
+            masked_outputs = {}
+            for head_name in outputs.keys():
+                if head_name in legal_masks:
+                    masked_outputs[head_name] = apply_legal_action_mask(outputs[head_name], legal_masks[head_name])
+                else:
+                    masked_outputs[head_name] = outputs[head_name]
 
             batch_size = len(states)
             action_types = labels['action_type'].cpu().numpy()
-            action_type_preds = outputs['action_type'].argmax(dim=1).cpu().numpy()
+            action_type_preds = masked_outputs['action_type'].argmax(dim=1).cpu().numpy()
 
             for i in range(batch_size):
                 true_action = action_types[i]
@@ -207,7 +223,7 @@ def evaluate_overall_action_accuracy(
                 if true_action == 0:  # BUILD
                     card_sel_label = labels['card_selection'][i].item()
                     if card_sel_label != -1:
-                        card_sel_pred = outputs['card_selection'][i].argmax().item()
+                        card_sel_pred = masked_outputs['card_selection'][i].argmax().item()
                         target_correct = (card_sel_pred == card_sel_label)
                     else:
                         target_correct = True  # No target to predict
@@ -215,7 +231,7 @@ def evaluate_overall_action_accuracy(
                 elif true_action == 1:  # RESERVE
                     card_res_label = labels['card_reservation'][i].item()
                     if card_res_label != -1:
-                        card_res_pred = outputs['card_reservation'][i].argmax().item()
+                        card_res_pred = masked_outputs['card_reservation'][i].argmax().item()
                         target_correct = (card_res_pred == card_res_label)
                     else:
                         target_correct = True
@@ -223,7 +239,7 @@ def evaluate_overall_action_accuracy(
                 elif true_action == 2:  # TAKE2
                     gem2_label = labels['gem_take2'][i].item()
                     if gem2_label != -1:
-                        gem2_pred = outputs['gem_take2'][i].argmax().item()
+                        gem2_pred = masked_outputs['gem_take2'][i].argmax().item()
                         target_correct = (gem2_pred == gem2_label)
                     else:
                         target_correct = True
@@ -231,7 +247,7 @@ def evaluate_overall_action_accuracy(
                 elif true_action == 3:  # TAKE3
                     gem3_label = labels['gem_take3'][i].item()
                     if gem3_label != -1:
-                        gem3_pred = outputs['gem_take3'][i].argmax().item()
+                        gem3_pred = masked_outputs['gem_take3'][i].argmax().item()
                         target_correct = (gem3_pred == gem3_label)
                     else:
                         target_correct = True
@@ -271,7 +287,7 @@ def evaluate_random_baseline(dataloader: torch.utils.data.DataLoader) -> Dict:
     overall_correct = 0
     total = 0
 
-    for states, labels in tqdm(dataloader, desc='Evaluating random baseline'):
+    for states, labels, masks in tqdm(dataloader, desc='Evaluating random baseline'):
         batch_size = len(states)
         action_types = labels['action_type'].cpu().numpy()
 

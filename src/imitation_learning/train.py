@@ -67,11 +67,37 @@ def compute_class_weights(labels: np.ndarray, num_classes: int, device: torch.de
     return torch.tensor(weights, dtype=torch.float32, device=device)
 
 
+def apply_legal_action_mask(logits: torch.Tensor, legal_masks: torch.Tensor) -> torch.Tensor:
+    """
+    Apply legal action masks to logits by setting illegal actions to -inf.
+
+    This ensures that illegal actions have zero probability after softmax,
+    forcing the model to only predict legal actions.
+
+    Args:
+        logits: Predicted logits of shape (batch_size, num_classes)
+        legal_masks: Binary masks of shape (batch_size, num_classes)
+                    where 1 = legal action, 0 = illegal action
+
+    Returns:
+        Masked logits of shape (batch_size, num_classes) with illegal actions set to -1e9
+    """
+    # Convert mask to same device as logits
+    legal_masks = legal_masks.to(logits.device)
+
+    # Apply mask: illegal actions (mask=0) get very negative logit (-1e9 ≈ -inf)
+    # Legal actions (mask=1) keep their original logit
+    masked_logits = logits + (1 - legal_masks) * -1e9
+
+    return masked_logits
+
+
 def compute_conditional_loss(
     logits: torch.Tensor,
     labels: torch.Tensor,
     mask: torch.Tensor,
-    weights: Optional[torch.Tensor] = None
+    weights: Optional[torch.Tensor] = None,
+    legal_masks: Optional[torch.Tensor] = None
 ) -> torch.Tensor:
     """
     Compute cross-entropy loss only for samples matching the mask.
@@ -81,6 +107,8 @@ def compute_conditional_loss(
         labels: True labels of shape (batch_size,)
         mask: Boolean mask of shape (batch_size,) indicating which samples to include
         weights: Optional class weights
+        legal_masks: Optional legal action masks of shape (batch_size, num_classes)
+                    where 1 = legal, 0 = illegal. If provided, illegal actions are masked.
 
     Returns:
         Scalar loss (0.0 if no valid samples)
@@ -89,7 +117,11 @@ def compute_conditional_loss(
         # No valid samples, return zero loss
         return torch.tensor(0.0, device=logits.device)
 
-    # Apply mask
+    # Apply legal action masking if provided
+    if legal_masks is not None:
+        logits = apply_legal_action_mask(logits, legal_masks)
+
+    # Apply sample mask
     logits_masked = logits[mask]
     labels_masked = labels[mask]
 
@@ -102,15 +134,17 @@ def compute_conditional_loss(
 def compute_total_loss(
     outputs: Dict[str, torch.Tensor],
     labels: Dict[str, torch.Tensor],
-    class_weights: Optional[Dict[str, torch.Tensor]] = None
+    class_weights: Optional[Dict[str, torch.Tensor]] = None,
+    legal_masks: Optional[Dict[str, torch.Tensor]] = None
 ) -> Tuple[torch.Tensor, Dict[str, float]]:
     """
-    Compute total loss across all heads with conditional masking.
+    Compute total loss across all heads with conditional masking and legal action masking.
 
     Args:
         outputs: Dict mapping head name to logits tensor
         labels: Dict mapping head name to label tensor
         class_weights: Optional dict of class weights per head
+        legal_masks: Optional dict of legal action masks per head (batch_size, n_classes)
 
     Returns:
         Tuple of (total_loss, per_head_losses_dict)
@@ -121,8 +155,14 @@ def compute_total_loss(
 
     # Action type: always compute (every sample has action type)
     action_type_weight = class_weights.get('action_type') if class_weights else None
+    action_type_logits = outputs['action_type']
+
+    # Apply legal action mask for action_type
+    if legal_masks is not None and 'action_type' in legal_masks:
+        action_type_logits = apply_legal_action_mask(action_type_logits, legal_masks['action_type'])
+
     losses['action_type'] = F.cross_entropy(
-        outputs['action_type'],
+        action_type_logits,
         action_types,
         weight=action_type_weight
     )
@@ -132,10 +172,12 @@ def compute_total_loss(
     card_sel_labels = labels['card_selection']
     card_sel_valid = card_sel_labels != -1
     card_sel_mask = build_mask & card_sel_valid
+    card_sel_legal_masks = legal_masks.get('card_selection') if legal_masks else None
     losses['card_selection'] = compute_conditional_loss(
         outputs['card_selection'],
         card_sel_labels,
-        card_sel_mask
+        card_sel_mask,
+        legal_masks=card_sel_legal_masks
     )
 
     # Card reservation: only when action_type == 1 (RESERVE) AND label != -1
@@ -143,10 +185,12 @@ def compute_total_loss(
     card_res_labels = labels['card_reservation']
     card_res_valid = card_res_labels != -1
     card_res_mask = reserve_mask & card_res_valid
+    card_res_legal_masks = legal_masks.get('card_reservation') if legal_masks else None
     losses['card_reservation'] = compute_conditional_loss(
         outputs['card_reservation'],
         card_res_labels,
-        card_res_mask
+        card_res_mask,
+        legal_masks=card_res_legal_masks
     )
 
     # Gem take3: only when action_type == 3 (TAKE3) AND label != -1
@@ -154,10 +198,12 @@ def compute_total_loss(
     gem3_labels = labels['gem_take3']
     gem3_valid = gem3_labels != -1
     gem3_mask = take3_mask & gem3_valid
+    gem3_legal_masks = legal_masks.get('gem_take3') if legal_masks else None
     losses['gem_take3'] = compute_conditional_loss(
         outputs['gem_take3'],
         gem3_labels,
-        gem3_mask
+        gem3_mask,
+        legal_masks=gem3_legal_masks
     )
 
     # Gem take2: only when action_type == 2 (TAKE2) AND label != -1
@@ -165,29 +211,35 @@ def compute_total_loss(
     gem2_labels = labels['gem_take2']
     gem2_valid = gem2_labels != -1
     gem2_mask = take2_mask & gem2_valid
+    gem2_legal_masks = legal_masks.get('gem_take2') if legal_masks else None
     losses['gem_take2'] = compute_conditional_loss(
         outputs['gem_take2'],
         gem2_labels,
-        gem2_mask
+        gem2_mask,
+        legal_masks=gem2_legal_masks
     )
 
     # Noble: only when action_type == 0 (BUILD) AND label != -1
     noble_labels = labels['noble']
     noble_valid = noble_labels != -1
     noble_mask = build_mask & noble_valid
+    noble_legal_masks = legal_masks.get('noble') if legal_masks else None
     losses['noble'] = compute_conditional_loss(
         outputs['noble'],
         noble_labels,
-        noble_mask
+        noble_mask,
+        legal_masks=noble_legal_masks
     )
 
     # Gems removed: only when label != 0 (class 0 = no removal)
     gems_rem_labels = labels['gems_removed']
     gems_rem_mask = gems_rem_labels != 0
+    gems_rem_legal_masks = legal_masks.get('gems_removed') if legal_masks else None
     losses['gems_removed'] = compute_conditional_loss(
         outputs['gems_removed'],
         gems_rem_labels,
-        gems_rem_mask
+        gems_rem_mask,
+        legal_masks=gems_rem_legal_masks
     )
 
     # Total loss is sum of all losses
@@ -231,10 +283,11 @@ def train_one_epoch(
 
     pbar = tqdm(dataloader, desc='Training', leave=False)
 
-    for states, labels in pbar:
+    for states, labels, masks in pbar:
         # Move to device
         states = states.to(device)
         labels = {k: v.to(device) for k, v in labels.items()}
+        masks = {k: v.to(device) for k, v in masks.items()}
 
         # Zero gradients
         optimizer.zero_grad()
@@ -242,8 +295,8 @@ def train_one_epoch(
         # Forward pass
         outputs = model(states)
 
-        # Compute loss
-        total_loss, per_head_losses = compute_total_loss(outputs, labels, class_weights)
+        # Compute loss with legal action masking
+        total_loss, per_head_losses = compute_total_loss(outputs, labels, class_weights, masks)
 
         # Backward pass
         total_loss.backward()
@@ -373,16 +426,17 @@ def validate(
     with torch.no_grad():
         pbar = tqdm(dataloader, desc='Validation', leave=False)
 
-        for states, labels in pbar:
+        for states, labels, masks in pbar:
             # Move to device
             states = states.to(device)
             labels = {k: v.to(device) for k, v in labels.items()}
+            masks = {k: v.to(device) for k, v in masks.items()}
 
             # Forward pass
             outputs = model(states)
 
-            # Compute loss
-            total_loss, per_head_losses = compute_total_loss(outputs, labels)
+            # Compute loss with legal action masking
+            total_loss, per_head_losses = compute_total_loss(outputs, labels, legal_masks=masks)
 
             # Accumulate losses
             total_loss_accum += total_loss.item()
