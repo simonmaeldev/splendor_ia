@@ -531,7 +531,9 @@ def get_mask_from_move_action_type(move, mask: np.ndarray) -> None:
         move: Single Move object
         mask: Binary mask array to update in-place (shape: 4)
     """
-    if mask # == [1,1,1,1] but in np.ndarray, return. ai!
+    # Early return if mask is already all ones (all actions legal)
+    if np.all(mask == 1):
+        return
 
     if move.actionType == BUILD:
         mask[0] = 1
