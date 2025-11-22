@@ -551,7 +551,8 @@ def get_mask_from_move_action_type(move, mask: np.ndarray) -> None:
             mask[3] = 1  # TAKE3
 
 
-def get_mask_from_move_card_selection(move, board, mask: np.ndarray) -> None:
+# from the line under, import at the top of the file Move and Board from src/splendor/ files . ai!
+def get_mask_from_move_card_selection(move: Move, board: Board, mask: np.ndarray) -> None:
     """Update card_selection mask for a single move.
 
     Args:
@@ -559,8 +560,6 @@ def get_mask_from_move_card_selection(move, board, mask: np.ndarray) -> None:
         board: Board object (needed to map Card objects to indices)
         mask: Binary mask array to update in-place (shape: 15)
     """
-    from splendor.constants import BUILD
-
     if move.actionType == BUILD:
         card = move.action  # Card object
         current_player = board.players[board.currentPlayer]
