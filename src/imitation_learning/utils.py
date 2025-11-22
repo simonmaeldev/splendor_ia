@@ -9,7 +9,9 @@ This module contains helper functions for:
 """
 
 import random
+import sys
 from itertools import combinations
+from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 import matplotlib.pyplot as plt
@@ -19,10 +21,14 @@ import seaborn as sns
 import torch
 from sklearn.metrics import confusion_matrix as sklearn_confusion_matrix
 
-from splendor.constants import BUILD, RESERVE, TOKENS
-# Add these imports for type annotations in mask generation functions
-from splendor.move import Move
 from splendor.board import Board
+from splendor.constants import BUILD, RESERVE, TOKENS
+from splendor.move import Move
+from spledor.cards import Card
+
+# Add parent directory to path to access utils package
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from utils.state_reconstruction import reconstruct_board_from_csv_row
 
 
 def set_seed(seed: int) -> None:
@@ -527,7 +533,7 @@ def get_num_gem_removal_classes() -> int:
 # ============================================================================
 
 
-def get_mask_from_move_action_type(move, mask: np.ndarray) -> None:
+def get_mask_from_move_action_type(move: Move, mask: np.ndarray) -> None:
     """Update action_type mask for a single move.
 
     Args:
@@ -554,7 +560,9 @@ def get_mask_from_move_action_type(move, mask: np.ndarray) -> None:
             mask[3] = 1  # TAKE3
 
 
-def get_mask_from_move_card_selection(move: Move, board: Board, mask: np.ndarray) -> None:
+def get_mask_from_move_card_selection(
+    move: Move, board: Board, mask: np.ndarray
+) -> None:
     """Update card_selection mask for a single move.
 
     Args:
@@ -585,7 +593,9 @@ def get_mask_from_move_card_selection(move: Move, board: Board, mask: np.ndarray
             mask[card_idx] = 1
 
 
-def get_mask_from_move_card_reservation(move, board, mask: np.ndarray) -> None:
+def get_mask_from_move_card_reservation(
+    move: Move, board: Board, mask: np.ndarray
+) -> None:
     """Update card_reservation mask for a single move.
 
     Args:
@@ -593,8 +603,6 @@ def get_mask_from_move_card_reservation(move, board, mask: np.ndarray) -> None:
         board: Board object (needed to map Card objects to indices)
         mask: Binary mask array to update in-place (shape: 15)
     """
-    from splendor.constants import RESERVE
-
     if move.actionType == RESERVE:
         action = move.action
 
@@ -604,7 +612,7 @@ def get_mask_from_move_card_reservation(move, board, mask: np.ndarray) -> None:
             card_idx = 11 + action  # level 1->12, 2->13, 3->14
         else:
             # Reserve from visible card: action is Card object
-            card = action
+            card: Card = action
             card_idx = None
 
             # Search visible cards (0-11)
@@ -621,7 +629,7 @@ def get_mask_from_move_card_reservation(move, board, mask: np.ndarray) -> None:
 
 
 def get_mask_from_move_gem_take3(
-    move, combo_to_class: Dict[Tuple[str, ...], int], mask: np.ndarray
+        move: Move, combo_to_class: Dict[Tuple[str, ...], int], mask: np.ndarray
 ) -> None:
     """Update gem_take3 mask for a single move.
 
@@ -630,8 +638,8 @@ def get_mask_from_move_gem_take3(
         combo_to_class: Mapping from tuple of color names to class index
         mask: Binary mask array to update in-place (shape: 26)
     """
-    from splendor.constants import TOKENS
-
+    if np.all(mask == 1):
+        return
     colors = ["white", "blue", "green", "red", "black"]
 
     if move.actionType == TOKENS:
@@ -639,7 +647,7 @@ def get_mask_from_move_gem_take3(
         non_zero_indices = [i for i in range(5) if tokens[i] > 0]
 
         # Check if it's TAKE3 (NOT TAKE2)
-        is_take2 = len(non_zero_indices) == 1 and tokens[non_zero_indices[0]] == 2
+        is_take2 = len(non_zero_indices) == 1 and tokens[non_zero_indices[0]] == 2 # refactor this line into a one liner function, because it's also present in get_mask_from_move_gem_take2. ai
 
         if not is_take2:
             # TAKE3: Multiple colors with value 1
@@ -658,19 +666,19 @@ def get_mask_from_move_gem_take2(move, mask: np.ndarray) -> None:
         move: Single Move object
         mask: Binary mask array to update in-place (shape: 5)
     """
-    from splendor.constants import TOKENS
-
+    if np.all(mask == 1):
+        return
     if move.actionType == TOKENS:
         tokens = move.action  # List of 6 integers
         non_zero_indices = [i for i in range(5) if tokens[i] > 0]
 
         # Check if it's TAKE2: exactly one color with value 2
-        if len(non_zero_indices) == 1 and tokens[non_zero_indices[0]] == 2:
+        if len(non_zero_indices) == 1 and tokens[non_zero_indices[0]] == 2: # here. ai!
             color_idx = non_zero_indices[0]
             mask[color_idx] = 1
 
 
-def get_mask_from_move_noble(move, board, mask: np.ndarray) -> None:
+def get_mask_from_move_noble(move: Move, board: Board, mask: np.ndarray) -> None:
     """Update noble mask for a single move.
 
     Args:
@@ -733,12 +741,6 @@ def generate_all_masks_from_row(row: Dict) -> Dict[str, np.ndarray]:
     """
     try:
         # Import here to avoid circular dependency
-        import sys
-        from pathlib import Path
-
-        # Add parent directory to path to access utils package
-        sys.path.insert(0, str(Path(__file__).parent.parent))
-        from utils.state_reconstruction import reconstruct_board_from_csv_row
 
         # Reconstruct board state
         board = reconstruct_board_from_csv_row(row)
