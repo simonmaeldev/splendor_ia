@@ -523,313 +523,176 @@ def get_num_gem_removal_classes() -> int:
 # MASK GENERATION FUNCTIONS FOR LEGAL MOVE MASKING
 # ============================================================================
 
-# refactor the convert_moves_* functions. Instead of doing a for move in moves in each function 
-# which is really inefficient, make the for in the generate_all_masks_from_row function 
-# convert_moves_to_action_type_mask will be absorbed by generate_all_masks_from_row. 
-# Now each convert_moves_* become a get_mask(s)_from_move, and takes only one move as parameter. ai!
-
-
-
-def convert_moves_to_action_type_mask(moves: List[Move], num_classes: int = 4) -> np.ndarray:
-    """Convert list of Move objects to action_type mask (4 classes: BUILD, RESERVE, TAKE2, TAKE3).
-
-    The distinction between TAKE2 and TAKE3:
-    - TAKE2: Exactly one color has value 2, all others 0 (taking 2 gems from same pile)
-    - TAKE3: Multiple colors with value 1 each (taking 1 gem from each of up to 3 different piles)
-      Can have 0, 1, 2, or 3 total gems if limited by available piles
-
+def get_mask_from_move_action_type(move, mask: np.ndarray) -> None:
+    """Update action_type mask for a single move.
+    
     Args:
-        moves: List[Move] of Move objects from board.getMoves()
-        num_classes: Number of action type classes (default 4)
-
-    Returns:
-        Binary mask of shape (num_classes,) where 1 = legal, 0 = illegal
-
-    Example:
-        >>> # Moves with BUILD and TAKE3 actions
-        >>> mask = convert_moves_to_action_type_mask(moves)
-        >>> mask  # [1, 0, 0, 1] for BUILD and TAKE3
-
+        move: Single Move object
+        mask: Binary mask array to update in-place (shape: 4)
     """
-
-    mask = np.zeros(num_classes, dtype=np.int8)
-
-    for move in moves:
-        if move.actionType == BUILD:
-            mask[0] = 1
-        elif move.actionType == RESERVE:
-            mask[1] = 1
-        elif move.actionType == TOKENS:
-            # Differentiate TAKE2 vs TAKE3 based on token pattern
-            tokens = move.action  # List of 6 integers
-            non_zero_indices = [i for i in range(5) if tokens[i] > 0]  # Exclude gold
-
-            # TAKE2 pattern: exactly one color with value 2
-            if len(non_zero_indices) == 1 and tokens[non_zero_indices[0]] == 2:
-                mask[2] = 1  # TAKE2
-            else:
-                mask[3] = 1  # TAKE3
-
-    return mask
+    from splendor.constants import BUILD, RESERVE, TOKENS
+    
+    if move.actionType == BUILD:
+        mask[0] = 1
+    elif move.actionType == RESERVE:
+        mask[1] = 1
+    elif move.actionType == TOKENS:
+        # Differentiate TAKE2 vs TAKE3 based on token pattern
+        tokens = move.action  # List of 6 integers
+        non_zero_indices = [i for i in range(5) if tokens[i] > 0]  # Exclude gold
+        
+        # TAKE2 pattern: exactly one color with value 2
+        if len(non_zero_indices) == 1 and tokens[non_zero_indices[0]] == 2:
+            mask[2] = 1  # TAKE2
+        else:
+            mask[3] = 1  # TAKE3
 
 
-def convert_moves_to_card_selection_mask(
-    moves: List[Move],
-    board,
-    num_classes: int = 15,
-) -> np.ndarray:
-    """Convert list of Move objects to card_selection mask (15 classes: 0-11 visible, 12-14 reserved).
-
-    Uses identity comparison (is) to match Card objects since cards are reconstructed.
-
+def get_mask_from_move_card_selection(move, board, mask: np.ndarray) -> None:
+    """Update card_selection mask for a single move.
+    
     Args:
-        moves: List[Move] of Move objects from board.getMoves()
+        move: Single Move object
         board: Board object (needed to map Card objects to indices)
-        num_classes: Number of card selection classes (default 15)
-
-    Returns:
-        Binary mask of shape (num_classes,) where 1 = legal, 0 = illegal
-
-    Example:
-        >>> mask = convert_moves_to_card_selection_mask(build_moves, board)
-        >>> # Mask has 1s at indices where cards can be built
-
+        mask: Binary mask array to update in-place (shape: 15)
     """
-
-    mask = np.zeros(num_classes, dtype=np.int8)
-    current_player = board.players[board.currentPlayer]
-
-    for move in moves:
-        if move.actionType == BUILD:
-            card = move.action  # Card object
-
-            # Search visible cards (0-11)
-            card_idx = None
-            level = card.lvl
-            for pos, displayed_card in enumerate(board.displayedCards[level]):
-                if displayed_card is card:  # Identity comparison
-                    card_idx = level * 4 + pos
-                    break
-            if card_idx is not None:
+    from splendor.constants import BUILD
+    
+    if move.actionType == BUILD:
+        card = move.action  # Card object
+        current_player = board.players[board.currentPlayer]
+        
+        # Search visible cards (0-11)
+        card_idx = None
+        level = card.lvl
+        for pos, displayed_card in enumerate(board.displayedCards[level]):
+            if displayed_card is card:  # Identity comparison
+                card_idx = level * 4 + pos
                 break
-
-            # Search reserved cards (12-14)
-            if card_idx is None:
-                for reserved_idx, reserved_card in enumerate(current_player.reserved):
-                    if reserved_card is card:
-                        card_idx = 12 + reserved_idx
-                        break
-
-            if card_idx is not None:
-                mask[card_idx] = 1
-
-    return mask
+        
+        # Search reserved cards (12-14)
+        if card_idx is None:
+            for reserved_idx, reserved_card in enumerate(current_player.reserved):
+                if reserved_card is card:
+                    card_idx = 12 + reserved_idx
+                    break
+        
+        if card_idx is not None:
+            mask[card_idx] = 1
 
 
-def convert_moves_to_card_reservation_mask(
-    moves: List[Move],
-    board,
-    num_classes: int = 15,
-) -> np.ndarray:
-    """Convert list of Move objects to card_reservation mask (15 classes: 0-11 visible, 12-14 top deck).
-
+def get_mask_from_move_card_reservation(move, board, mask: np.ndarray) -> None:
+    """Update card_reservation mask for a single move.
+    
     Args:
-        moves: List[Move] of Move objects from board.getMoves()
+        move: Single Move object
         board: Board object (needed to map Card objects to indices)
-        num_classes: Number of card reservation classes (default 15)
-
-    Returns:
-        Binary mask of shape (num_classes,) where 1 = legal, 0 = illegal
-
-    Example:
-        >>> mask = convert_moves_to_card_reservation_mask(reserve_moves, board)
-        >>> # Mask has 1s at indices where cards can be reserved
-
+        mask: Binary mask array to update in-place (shape: 15)
     """
     from splendor.constants import RESERVE
-
-    mask = np.zeros(num_classes, dtype=np.int8)
-
-    for move in moves:
-        if move.actionType == RESERVE:
-            action = move.action
-
-            if isinstance(action, int):
-                # Top deck reservation: action is deck level (1, 2, or 3)
-                # Map to indices 12, 13, 14
-                card_idx = 11 + action  # level 1->12, 2->13, 3->14
-            else:
-                # Reserve from visible card: action is Card object
-                card = action
-                card_idx = None
-
-                # Search visible cards (0-11)
-                for level in range(3):
-                    for pos, displayed_card in enumerate(board.displayedCards[level]):
-                        if displayed_card is card:
-                            card_idx = level * 4 + pos
-                            break
-                    if card_idx is not None:
+    
+    if move.actionType == RESERVE:
+        action = move.action
+        
+        if isinstance(action, int):
+            # Top deck reservation: action is deck level (1, 2, or 3)
+            # Map to indices 12, 13, 14
+            card_idx = 11 + action  # level 1->12, 2->13, 3->14
+        else:
+            # Reserve from visible card: action is Card object
+            card = action
+            card_idx = None
+            
+            # Search visible cards (0-11)
+            for level in range(3):
+                for pos, displayed_card in enumerate(board.displayedCards[level]):
+                    if displayed_card is card:
+                        card_idx = level * 4 + pos
                         break
-
-            if card_idx is not None:
-                mask[card_idx] = 1
-
-    return mask
-
-
-def convert_moves_to_gem_take3_mask(
-    moves: List[Move],
-    combo_to_class: Dict[Tuple[str, ...], int],
-    num_classes: int = 26,
-) -> np.ndarray:
-    """Convert list of Move objects to gem_take3 mask (26 classes: 0-25 for different gem combinations).
-
-    TAKE3 pattern: Taking 1 gem from each of up to 3 different piles.
-    Can have 0, 1, 2, or 3 total gems if limited by available piles.
-
-    Args:
-        moves: List[Move] of Move objects from board.getMoves()
-        combo_to_class: Mapping from tuple of color names to class index
-        num_classes: Number of gem_take3 classes (default 26)
-
-    Returns:
-        Binary mask of shape (num_classes,) where 1 = legal, 0 = illegal
-
-    Example:
-        >>> _, combo_to_class = generate_gem_take3_classes()
-        >>> mask = convert_moves_to_gem_take3_mask(moves, combo_to_class)
-
-    """
-    from splendor.constants import TOKENS
-
-    colors = ["white", "blue", "green", "red", "black"]
-    mask = np.zeros(num_classes, dtype=np.int8)
-
-    for move in moves:
-        if move.actionType == TOKENS:
-            tokens = move.action  # List of 6 integers
-            non_zero_indices = [i for i in range(5) if tokens[i] > 0]
-
-            # Check if it's TAKE3 (NOT TAKE2)
-            is_take2 = len(non_zero_indices) == 1 and tokens[non_zero_indices[0]] == 2
-
-            if not is_take2:
-                # TAKE3: Multiple colors with value 1
-                selected_colors = [colors[i] for i in range(5) if tokens[i] > 0]
-                gems_tuple = tuple(selected_colors)
-
-                class_idx = combo_to_class.get(gems_tuple, -1)
-                if class_idx != -1:
-                    mask[class_idx] = 1
-
-    return mask
-
-
-def convert_moves_to_gem_take2_mask(moves: List[Move], num_classes: int = 5) -> np.ndarray:
-    """Convert list of Move objects to gem_take2 mask (5 classes: white, blue, green, red, black).
-
-    TAKE2 pattern: Taking 2 gems from the same color pile.
-
-    Args:
-        moves: List[Move] of Move objects from board.getMoves()
-        num_classes: Number of gem_take2 classes (default 5)
-
-    Returns:
-        Binary mask of shape (num_classes,) where 1 = legal, 0 = illegal
-
-    Example:
-        >>> mask = convert_moves_to_gem_take2_mask(moves)
-        >>> # mask[2] = 1 means can take 2 green gems
-
-    """
-    from splendor.constants import TOKENS
-
-    mask = np.zeros(num_classes, dtype=np.int8)
-
-    for move in moves:
-        if move.actionType == TOKENS:
-            tokens = move.action  # List of 6 integers
-            non_zero_indices = [i for i in range(5) if tokens[i] > 0]
-
-            # Check if it's TAKE2: exactly one color with value 2
-            if len(non_zero_indices) == 1 and tokens[non_zero_indices[0]] == 2:
-                color_idx = non_zero_indices[0]
-                mask[color_idx] = 1
-
-    return mask
-
-
-def convert_moves_to_noble_mask(moves: List[Move], board, num_classes: int = 5) -> np.ndarray:
-    """Convert list of Move objects to noble mask (5 classes: noble indices 0-4).
-
-    Noble acquisition is conditional on other actions (BUILD typically).
-    May result in all-zero mask if no nobles are available.
-
-    Args:
-        moves: List[Move] of Move objects from board.getMoves()
-        board: Board object (needed to map Character objects to indices)
-        num_classes: Number of noble classes (default 5)
-
-    Returns:
-        Binary mask of shape (num_classes,) where 1 = legal, 0 = illegal
-        NOTE: All-zero mask is valid when no nobles are acquirable
-
-    Example:
-        >>> mask = convert_moves_to_noble_mask(moves, board)
-        >>> # mask[0] = 1 means noble at index 0 can be acquired
-
-    """
-    mask = np.zeros(num_classes, dtype=np.int8)
-
-    for move in moves:
-        if move.character is not None:
-            # Find character index in board.characters
-            for idx, character in enumerate(board.characters):
-                if character is move.character:
-                    mask[idx] = 1
+                if card_idx is not None:
                     break
+        
+        if card_idx is not None:
+            mask[card_idx] = 1
 
-    return mask
 
-
-def convert_moves_to_gems_removed_mask(
-    moves: List[Move],
-    removal_to_class: Dict[Tuple[int, ...], int],
-    num_classes: int = 84,
-) -> np.ndarray:
-    """Convert list of Move objects to gems_removed mask (84 classes for different removal patterns).
-
-    Gems are removed when a player has more than 10 tokens after an action.
-
+def get_mask_from_move_gem_take3(move, combo_to_class: Dict[Tuple[str, ...], int], mask: np.ndarray) -> None:
+    """Update gem_take3 mask for a single move.
+    
     Args:
-        moves: List[Move] of Move objects from board.getMoves()
-        removal_to_class: Mapping from tuple of 6 counts to class index
-        num_classes: Number of gems_removed classes (default 84)
-
-    Returns:
-        Binary mask of shape (num_classes,) where 1 = legal, 0 = illegal
-        NOTE: Class 0 (no removal) is almost always legal
-
-    Example:
-        >>> _, removal_to_class = generate_gem_removal_classes()
-        >>> mask = convert_moves_to_gems_removed_mask(moves, removal_to_class)
-
+        move: Single Move object
+        combo_to_class: Mapping from tuple of color names to class index
+        mask: Binary mask array to update in-place (shape: 26)
     """
-    mask = np.zeros(num_classes, dtype=np.int8)
+    from splendor.constants import TOKENS
+    
+    colors = ["white", "blue", "green", "red", "black"]
+    
+    if move.actionType == TOKENS:
+        tokens = move.action  # List of 6 integers
+        non_zero_indices = [i for i in range(5) if tokens[i] > 0]
+        
+        # Check if it's TAKE3 (NOT TAKE2)
+        is_take2 = len(non_zero_indices) == 1 and tokens[non_zero_indices[0]] == 2
+        
+        if not is_take2:
+            # TAKE3: Multiple colors with value 1
+            selected_colors = [colors[i] for i in range(5) if tokens[i] > 0]
+            gems_tuple = tuple(selected_colors)
+            
+            class_idx = combo_to_class.get(gems_tuple, -1)
+            if class_idx != -1:
+                mask[class_idx] = 1
 
-    for move in moves:
-        removal_tuple = tuple(move.tokensToRemove)
-        class_idx = removal_to_class.get(removal_tuple, -1)
 
-        if class_idx != -1:
-            mask[class_idx] = 1
+def get_mask_from_move_gem_take2(move, mask: np.ndarray) -> None:
+    """Update gem_take2 mask for a single move.
+    
+    Args:
+        move: Single Move object
+        mask: Binary mask array to update in-place (shape: 5)
+    """
+    from splendor.constants import TOKENS
+    
+    if move.actionType == TOKENS:
+        tokens = move.action  # List of 6 integers
+        non_zero_indices = [i for i in range(5) if tokens[i] > 0]
+        
+        # Check if it's TAKE2: exactly one color with value 2
+        if len(non_zero_indices) == 1 and tokens[non_zero_indices[0]] == 2:
+            color_idx = non_zero_indices[0]
+            mask[color_idx] = 1
 
-    # Class 0 (no removal) should typically be legal
-    if removal_to_class.get((0, 0, 0, 0, 0, 0)) is not None:
-        mask[0] = 1
 
-    return mask
+def get_mask_from_move_noble(move, board, mask: np.ndarray) -> None:
+    """Update noble mask for a single move.
+    
+    Args:
+        move: Single Move object
+        board: Board object (needed to map Character objects to indices)
+        mask: Binary mask array to update in-place (shape: 5)
+    """
+    if move.character is not None:
+        # Find character index in board.characters
+        for idx, character in enumerate(board.characters):
+            if character is move.character:
+                mask[idx] = 1
+                break
+
+
+def get_mask_from_move_gems_removed(move, removal_to_class: Dict[Tuple[int, ...], int], mask: np.ndarray) -> None:
+    """Update gems_removed mask for a single move.
+    
+    Args:
+        move: Single Move object
+        removal_to_class: Mapping from tuple of 6 counts to class index
+        mask: Binary mask array to update in-place (shape: 84)
+    """
+    removal_tuple = tuple(move.tokensToRemove)
+    class_idx = removal_to_class.get(removal_tuple, -1)
+    
+    if class_idx != -1:
+        mask[class_idx] = 1
 
 
 def generate_all_masks_from_row(row: Dict) -> Dict[str, np.ndarray]:
@@ -879,32 +742,30 @@ def generate_all_masks_from_row(row: Dict) -> Dict[str, np.ndarray]:
         _, combo_to_class_take3 = generate_gem_take3_classes()
         _, removal_to_class = generate_gem_removal_classes()
 
-        # Generate masks for each head
+        # Initialize masks
         masks = {
-            "action_type": convert_moves_to_action_type_mask(moves, num_classes=4),
-            "card_selection": convert_moves_to_card_selection_mask(
-                moves,
-                board,
-                num_classes=15,
-            ),
-            "card_reservation": convert_moves_to_card_reservation_mask(
-                moves,
-                board,
-                num_classes=15,
-            ),
-            "gem_take3": convert_moves_to_gem_take3_mask(
-                moves,
-                combo_to_class_take3,
-                num_classes=26,
-            ),
-            "gem_take2": convert_moves_to_gem_take2_mask(moves, num_classes=5),
-            "noble": convert_moves_to_noble_mask(moves, board, num_classes=5),
-            "gems_removed": convert_moves_to_gems_removed_mask(
-                moves,
-                removal_to_class,
-                num_classes=get_num_gem_removal_classes(),
-            ),
+            "action_type": np.zeros(4, dtype=np.int8),
+            "card_selection": np.zeros(15, dtype=np.int8),
+            "card_reservation": np.zeros(15, dtype=np.int8),
+            "gem_take3": np.zeros(26, dtype=np.int8),
+            "gem_take2": np.zeros(5, dtype=np.int8),
+            "noble": np.zeros(5, dtype=np.int8),
+            "gems_removed": np.zeros(get_num_gem_removal_classes(), dtype=np.int8),
         }
+
+        # Process each move once and update all masks
+        for move in moves:
+            get_mask_from_move_action_type(move, masks["action_type"])
+            get_mask_from_move_card_selection(move, board, masks["card_selection"])
+            get_mask_from_move_card_reservation(move, board, masks["card_reservation"])
+            get_mask_from_move_gem_take3(move, combo_to_class_take3, masks["gem_take3"])
+            get_mask_from_move_gem_take2(move, masks["gem_take2"])
+            get_mask_from_move_noble(move, board, masks["noble"])
+            get_mask_from_move_gems_removed(move, removal_to_class, masks["gems_removed"])
+
+        # Class 0 (no removal) should typically be legal
+        if removal_to_class.get((0, 0, 0, 0, 0, 0)) is not None:
+            masks["gems_removed"][0] = 1
 
         return masks
 
