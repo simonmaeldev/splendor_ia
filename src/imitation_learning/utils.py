@@ -20,6 +20,9 @@ import torch
 from sklearn.metrics import confusion_matrix as sklearn_confusion_matrix
 
 from splendor.constants import BUILD, RESERVE, TOKENS
+# Add these imports for type annotations in mask generation functions
+from splendor.move import Move
+from splendor.board import Board
 
 
 def set_seed(seed: int) -> None:
@@ -551,7 +554,6 @@ def get_mask_from_move_action_type(move, mask: np.ndarray) -> None:
             mask[3] = 1  # TAKE3
 
 
-# from the line under, import at the top of the file Move and Board from src/splendor/ files . ai!
 def get_mask_from_move_card_selection(move: Move, board: Board, mask: np.ndarray) -> None:
     """Update card_selection mask for a single move.
 
