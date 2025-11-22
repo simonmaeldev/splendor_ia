@@ -628,6 +628,19 @@ def get_mask_from_move_card_reservation(
             mask[card_idx] = 1
 
 
+def is_take2_action(tokens: List[int]) -> bool:
+    """Check if token pattern represents a TAKE2 action.
+    
+    Args:
+        tokens: List of 6 integers representing token counts
+        
+    Returns:
+        True if this is a TAKE2 action (exactly one color with value 2)
+    """
+    non_zero_indices = [i for i in range(5) if tokens[i] > 0]  # Exclude gold
+    return len(non_zero_indices) == 1 and tokens[non_zero_indices[0]] == 2
+
+
 def get_mask_from_move_gem_take3(
         move: Move, combo_to_class: Dict[Tuple[str, ...], int], mask: np.ndarray
 ) -> None:
@@ -644,12 +657,9 @@ def get_mask_from_move_gem_take3(
 
     if move.actionType == TOKENS:
         tokens = move.action  # List of 6 integers
-        non_zero_indices = [i for i in range(5) if tokens[i] > 0]
 
         # Check if it's TAKE3 (NOT TAKE2)
-        is_take2 = len(non_zero_indices) == 1 and tokens[non_zero_indices[0]] == 2 # refactor this line into a one liner function, because it's also present in get_mask_from_move_gem_take2. ai
-
-        if not is_take2:
+        if not is_take2_action(tokens):
             # TAKE3: Multiple colors with value 1
             selected_colors = [colors[i] for i in range(5) if tokens[i] > 0]
             gems_tuple = tuple(selected_colors)
@@ -670,10 +680,10 @@ def get_mask_from_move_gem_take2(move, mask: np.ndarray) -> None:
         return
     if move.actionType == TOKENS:
         tokens = move.action  # List of 6 integers
-        non_zero_indices = [i for i in range(5) if tokens[i] > 0]
 
         # Check if it's TAKE2: exactly one color with value 2
-        if len(non_zero_indices) == 1 and tokens[non_zero_indices[0]] == 2: # here. ai!
+        if is_take2_action(tokens):
+            non_zero_indices = [i for i in range(5) if tokens[i] > 0]
             color_idx = non_zero_indices[0]
             mask[color_idx] = 1
 
