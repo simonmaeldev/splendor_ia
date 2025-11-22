@@ -9,6 +9,7 @@ This module implements the complete training pipeline including:
 """
 
 import argparse
+from datetime import datetime
 import json
 import os
 from pathlib import Path
@@ -609,6 +610,19 @@ def main():
     print(f"Loading configuration from {args.config}...")
     config = load_config(args.config)
 
+    # Extract config size from config path (e.g., "config_small.yaml" -> "small")
+    config_path = Path(args.config)
+    config_stem = config_path.stem  # e.g., "config_small"
+    if config_stem.startswith('config_'):
+        config_size = config_stem.replace('config_', '')
+    else:
+        config_size = config_stem
+
+    # Generate timestamp for this run (format: YYYYMMDDHHmm)
+    run_timestamp = datetime.now().strftime('%Y%m%d%H%M')
+    run_name = f"{run_timestamp}_config_{config_size}"
+    print(f"Run name: {run_name}")
+
     # Set seed
     set_seed(config['seed'])
     print(f"Random seed set to {config['seed']}")
@@ -655,12 +669,17 @@ def main():
         project=config['logging']['wandb_project'],
         entity=config['logging'].get('wandb_entity'),
         config=config,
-        name=f"splendor_il_{Path(args.config).stem}"
+        name=run_name
     )
     wandb.watch(model, log='all', log_freq=100)
 
     # Initialize early stopping
     early_stopping = EarlyStopping(patience=config['training']['patience'])
+
+    # Create model checkpoint directory for this run
+    checkpoint_dir = os.path.join(config['checkpointing']['save_dir'], run_name)
+    os.makedirs(checkpoint_dir, exist_ok=True)
+    print(f"Checkpoint directory: {checkpoint_dir}")
 
     # Load checkpoint if resuming
     start_epoch = 0
@@ -720,13 +739,13 @@ def main():
         # Save checkpoint if improved
         if val_loss < best_val_loss:
             best_val_loss = val_loss
-            save_path = os.path.join(config['checkpointing']['save_dir'], 'best_model.pth')
+            save_path = os.path.join(checkpoint_dir, 'best_model.pth')
             save_checkpoint(model, optimizer, epoch, val_loss, val_per_head_accs, save_path)
             print(f"  ✓ Saved best model (val_loss={val_loss:.4f})")
 
         # Save periodic checkpoint
         if (epoch + 1) % config['checkpointing']['save_every'] == 0:
-            save_path = os.path.join(config['checkpointing']['save_dir'], f'checkpoint_epoch_{epoch+1}.pth')
+            save_path = os.path.join(checkpoint_dir, f'checkpoint_epoch_{epoch+1}.pth')
             save_checkpoint(model, optimizer, epoch, val_loss, val_per_head_accs, save_path)
 
         # Check early stopping
@@ -735,13 +754,13 @@ def main():
             break
 
     # Save final model
-    final_save_path = os.path.join(config['checkpointing']['save_dir'], 'final_model.pth')
+    final_save_path = os.path.join(checkpoint_dir, 'final_model.pth')
     save_checkpoint(model, optimizer, epoch, val_loss, val_per_head_accs, final_save_path)
     print(f"\nSaved final model to {final_save_path}")
 
     # Plot training curves
     if config['logging']['save_plots']:
-        plot_path = os.path.join('logs', f'training_curves_{wandb.run.id}.png')
+        plot_path = os.path.join('logs', f'training_curves_{run_name}.png')
         plot_training_curves(train_losses, val_losses, val_accuracies, plot_path)
         print(f"Saved training curves to {plot_path}")
 
@@ -749,7 +768,7 @@ def main():
     print(f"\n{'='*60}")
     print(f"Training complete!")
     print(f"Best validation loss: {best_val_loss:.4f}")
-    print(f"Best model saved to: {os.path.join(config['checkpointing']['save_dir'], 'best_model.pth')}")
+    print(f"Best model saved to: {os.path.join(checkpoint_dir, 'best_model.pth')}")
     print(f"{'='*60}\n")
 
     wandb.finish()

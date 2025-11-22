@@ -142,3 +142,7 @@ data/games/4_games/*.csv.backup
 
 data/processed/
 .aider*
+
+data/models/
+logs/
+wandb/
