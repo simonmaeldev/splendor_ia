@@ -4,6 +4,19 @@ This module loads raw CSV files from MCTS self-play games, performs feature engi
 encodes labels into classification tasks, splits data at game-level, normalizes features,
 and saves preprocessed arrays ready for training.
 
+Pipeline steps:
+1. Load CSV files (preserving NaN for game state reconstruction)
+2. Generate legal action masks (requires NaN values)
+3. Fill NaN values with 0 (for feature engineering)
+4. Compact visible cards and add position indices (NEW: improves positional invariance)
+5. Feature engineering (one-hot encoding categorical features)
+6. Normalization (excluding position indices and binary features)
+7. Split by game_id and save preprocessed arrays
+
+After card compaction, feature count changes:
+- Old: 382 base features → ~450 after one-hot encoding
+- New: 406 base features → ~474 after one-hot encoding (+24 position features)
+
 Usage:
     python data_preprocessing.py --config config.yaml
 """
@@ -178,6 +191,129 @@ def fill_nan_values(df: pd.DataFrame) -> pd.DataFrame:
     return df_filled
 
 
+def compact_cards_and_add_position(df: pd.DataFrame) -> pd.DataFrame:
+    """Compact visible cards (move zeros to end) and add position index feature.
+
+    This function:
+    1. Identifies non-zero visible cards (cards 0-11)
+    2. Reorders them: non-zero first, zeros at end
+    3. Adds position index feature: 0, 1, 2, ... for non-zero; -1 for zeros
+    4. For reserved cards: adds position 12, 13, 14 per player; -1 for missing
+
+    Args:
+        df: DataFrame with filled NaN values (all zeros for missing cards)
+
+    Returns:
+        DataFrame with compacted cards and position features added
+    """
+    print("\nCompacting cards and adding position indices...")
+
+    df_compacted = df.copy()
+
+    # Card feature names (excluding position which we'll add)
+    card_feature_names = ['vp', 'level', 'cost_white', 'cost_blue', 'cost_green',
+                          'cost_red', 'cost_black', 'bonus_white', 'bonus_blue',
+                          'bonus_green', 'bonus_red', 'bonus_black']
+
+    # Process visible cards (card0 to card11)
+    print("  Processing visible cards (0-11)...")
+
+    # Extract all visible card features as a 3D array: (n_samples, 12 cards, 12 features)
+    visible_card_data = []
+    for card_idx in range(12):
+        card_cols = [f'card{card_idx}_{feat}' for feat in card_feature_names]
+        card_values = df_compacted[card_cols].values  # (n_samples, 12)
+        visible_card_data.append(card_values)
+
+    # Stack to get (n_samples, 12 cards, 12 features)
+    visible_card_data = np.stack(visible_card_data, axis=1)
+
+    # Identify non-zero cards: a card is non-zero if ANY feature is non-zero
+    # Shape: (n_samples, 12)
+    is_nonzero = np.any(visible_card_data != 0, axis=2)
+
+    # For each sample, compact cards
+    n_samples = len(df_compacted)
+    compacted_visible = np.zeros_like(visible_card_data)
+    position_indices = np.full((n_samples, 12), -1, dtype=int)
+
+    for sample_idx in range(n_samples):
+        # Get indices of non-zero and zero cards for this sample
+        nonzero_indices = np.where(is_nonzero[sample_idx])[0]
+        zero_indices = np.where(~is_nonzero[sample_idx])[0]
+
+        # Combine: non-zero first, then zeros
+        reordered_indices = np.concatenate([nonzero_indices, zero_indices])
+
+        # Reorder card features
+        compacted_visible[sample_idx] = visible_card_data[sample_idx, reordered_indices]
+
+        # Assign position indices: 0, 1, 2, ... for non-zero, -1 for zeros
+        position_indices[sample_idx, :len(nonzero_indices)] = np.arange(len(nonzero_indices))
+
+    # Write back to dataframe
+    # First, drop old card columns
+    old_card_cols = []
+    for card_idx in range(12):
+        old_card_cols.extend([f'card{card_idx}_{feat}' for feat in card_feature_names])
+    df_compacted = df_compacted.drop(columns=old_card_cols)
+
+    # Build new columns efficiently using dict to avoid fragmentation
+    new_cols = {}
+    for card_idx in range(12):
+        # Add position column
+        new_cols[f'card{card_idx}_position'] = position_indices[:, card_idx]
+
+        # Add feature columns
+        for feat_idx, feat_name in enumerate(card_feature_names):
+            new_cols[f'card{card_idx}_{feat_name}'] = compacted_visible[:, card_idx, feat_idx]
+
+    # Concatenate all new columns at once
+    df_compacted = pd.concat([df_compacted, pd.DataFrame(new_cols)], axis=1)
+
+    print(f"    Compacted {np.sum(is_nonzero)} non-zero visible cards")
+
+    # Process reserved cards (3 per player, positions 12, 13, 14)
+    print("  Processing reserved cards (3 per player)...")
+
+    # Collect all old and new columns for reserved cards
+    old_reserved_cols = []
+    new_reserved_cols = {}
+
+    for player_idx in range(4):
+        for reserved_idx in range(3):
+            # Extract reserved card features
+            reserved_cols = [f'player{player_idx}_reserved{reserved_idx}_{feat}'
+                           for feat in card_feature_names]
+            reserved_values = df_compacted[reserved_cols].values  # (n_samples, 12)
+            old_reserved_cols.extend(reserved_cols)
+
+            # Check if card is present (any non-zero feature)
+            is_present = np.any(reserved_values != 0, axis=1)  # (n_samples,)
+
+            # Assign position: 12, 13, or 14 if present, -1 if missing
+            position = 12 + reserved_idx
+            position_col = np.where(is_present, position, -1)
+
+            # Add position column first
+            col_prefix = f'player{player_idx}_reserved{reserved_idx}'
+            new_reserved_cols[f'{col_prefix}_position'] = position_col
+
+            # Add back feature columns
+            for feat_idx, feat_name in enumerate(card_feature_names):
+                new_reserved_cols[f'{col_prefix}_{feat_name}'] = reserved_values[:, feat_idx]
+
+    # Drop old columns and add new ones efficiently
+    df_compacted = df_compacted.drop(columns=old_reserved_cols)
+    df_compacted = pd.concat([df_compacted, pd.DataFrame(new_reserved_cols)], axis=1)
+
+    print(f"  Added position indices to all cards")
+    print(f"  Visible cards: 12 cards × 13 features (position + 12) = 156 features")
+    print(f"  Reserved cards per player: 3 cards × 13 features = 39 features")
+
+    return df_compacted
+
+
 def identify_column_groups(df: pd.DataFrame) -> Tuple[List[str], List[str], List[str]]:
     """Identify column groups: metadata, labels, features.
 
@@ -278,11 +414,13 @@ def engineer_features(
                 onehot_cols.append(col_name)
 
     # Update feature columns: remove original categorical, add one-hot
+    # Note: We keep card/reserved position features but exclude player position metadata
+    player_position_cols = [f"player{i}_position" for i in range(4)]
     new_feature_cols = [
         col
         for col in feature_cols
         if col not in ["current_player", "num_players"]
-        and not col.endswith("_position")
+        and col not in player_position_cols
     ]
     new_feature_cols.extend(onehot_cols)
 
@@ -317,6 +455,10 @@ def create_normalization_mask(
             col.endswith(f"_bonus_{color}")
             for color in ["white", "blue", "green", "red", "black"]
         ):
+            mask[idx] = False
+
+        # Don't normalize position indices (discrete values: -1, 0, 1, 2, ...)
+        if 'position' in col:
             mask[idx] = False
 
     print(
@@ -899,11 +1041,15 @@ def main():
     # Now fill NaN for feature engineering
     df_filled = fill_nan_values(df)
 
+    # Compact cards and add position indices
+    # This must be done AFTER fill_nan_values but BEFORE feature engineering
+    df_compacted = compact_cards_and_add_position(df_filled)
+
     # Identify column groups
-    metadata_cols, label_cols, feature_cols = identify_column_groups(df_filled)
+    metadata_cols, label_cols, feature_cols = identify_column_groups(df_compacted)
 
     # Engineer features (one-hot encoding)
-    df_eng, feature_cols_eng, onehot_cols = engineer_features(df_filled, feature_cols)
+    df_eng, feature_cols_eng, onehot_cols = engineer_features(df_compacted, feature_cols)
 
     # Create normalization mask
     norm_mask = create_normalization_mask(feature_cols_eng, onehot_cols)
