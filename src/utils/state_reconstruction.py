@@ -64,6 +64,12 @@ def parse_card_features(features: List[float]) -> Optional[Card]:
     vp = int(features[0])
     level = int(features[1])
 
+    # Check if level is 0 (indicates missing card after fillna)
+    # Cards in Splendor have levels 1, 2, or 3 (never 0)
+    # After fillna(0), missing cards appear as level=0
+    if level == 0:
+        return None
+
     # Extract costs (5 colors: white, blue, green, red, black)
     cost = [int(features[2 + i]) for i in range(5)]
 

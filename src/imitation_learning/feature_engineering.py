@@ -170,7 +170,10 @@ def extract_card_features(row: pd.Series, board: Board) -> FeatureDict:
     features: FeatureDict = {}
     colors = ["white", "blue", "green", "red", "black"]
 
-    for player_idx in range(4):
+    num_players = len(board.players)
+
+    # Extract features for actual players
+    for player_idx in range(num_players):
         player = board.players[player_idx]
 
         # Collect all cards this player could interact with
@@ -252,6 +255,17 @@ def extract_card_features(row: pd.Series, board: Board) -> FeatureDict:
 
                 features[f"{prefix}vp_if_buy"] = float(projected_vp)
 
+    # Pad features for missing players with zeros
+    for player_idx in range(num_players, 4):
+        for card_idx in range(15):
+            prefix = f"player{player_idx}_card{card_idx}_"
+            features[f"{prefix}can_build"] = 0.0
+            features[f"{prefix}must_use_gold"] = 0.0
+            for color in colors:
+                features[f"{prefix}distance_{color}"] = 0.0
+            features[f"{prefix}distance_total"] = 0.0
+            features[f"{prefix}vp_if_buy"] = 0.0
+
     return features
 
 
@@ -277,7 +291,10 @@ def extract_noble_features(row: pd.Series, board: Board) -> FeatureDict:
     features: FeatureDict = {}
     colors = ["white", "blue", "green", "red", "black"]
 
-    for player_idx in range(4):
+    num_players = len(board.players)
+
+    # Extract features for actual players
+    for player_idx in range(num_players):
         player = board.players[player_idx]
         reductions = player.getTotalBonus()
 
@@ -325,6 +342,17 @@ def extract_noble_features(row: pd.Series, board: Board) -> FeatureDict:
             acquirable_count
         )
 
+    # Pad features for missing players with zeros
+    for player_idx in range(num_players, 4):
+        for noble_idx in range(5):
+            prefix = f"player{player_idx}_noble{noble_idx}_"
+            for color in colors:
+                features[f"{prefix}distance_{color}"] = 0.0
+            features[f"{prefix}distance_total"] = 0.0
+            features[f"{prefix}acquirable"] = 0.0
+        features[f"player{player_idx}_closest_noble_distance"] = 0.0
+        features[f"player{player_idx}_nobles_acquirable_count"] = 0.0
+
     return features
 
 
@@ -344,7 +372,10 @@ def extract_card_noble_synergy(row: pd.Series, board: Board) -> FeatureDict:
     """
     features: FeatureDict = {}
 
-    for player_idx in range(4):
+    num_players = len(board.players)
+
+    # Extract features for actual players
+    for player_idx in range(num_players):
         player = board.players[player_idx]
 
         # Collect all cards
@@ -394,6 +425,13 @@ def extract_card_noble_synergy(row: pd.Series, board: Board) -> FeatureDict:
                     min_distance
                 )
 
+    # Pad features for missing players with zeros
+    for player_idx in range(num_players, 4):
+        for card_idx in range(15):
+            prefix = f"player{player_idx}_card{card_idx}_"
+            features[f"{prefix}nobles_after_buy"] = 0.0
+            features[f"{prefix}closest_noble_distance_after_buy"] = 0.0
+
     return features
 
 
@@ -429,11 +467,14 @@ def extract_player_comparison_features(row: pd.Series, board: Board) -> FeatureD
     """
     features: FeatureDict = {}
 
-    # Collect player stats
-    player_vps = []
-    player_reductions = []
+    num_players = len(board.players)
 
-    for player_idx in range(4):
+    # Collect player stats (pad with zeros for missing players)
+    player_vps = [0.0] * 4
+    player_reductions = [0.0] * 4
+
+    # Extract features for actual players
+    for player_idx in range(num_players):
         player = board.players[player_idx]
         prefix = f"player{player_idx}_"
 
@@ -443,8 +484,8 @@ def extract_player_comparison_features(row: pd.Series, board: Board) -> FeatureD
         total_tokens = float(sum(player.tokens[:5]))  # Exclude gold
         buying_capacity = total_tokens + total_reduction
 
-        player_vps.append(vp)
-        player_reductions.append(total_reduction)
+        player_vps[player_idx] = vp
+        player_reductions[player_idx] = total_reduction
 
         features[f"{prefix}vp"] = vp
         features[f"{prefix}total_gems_reduction"] = total_reduction
@@ -456,6 +497,18 @@ def extract_player_comparison_features(row: pd.Series, board: Board) -> FeatureD
         features[f"{prefix}num_reserved_cards"] = float(len(player.reserved))
         features[f"{prefix}num_nobles_acquired"] = float(len(player.characters))
         features[f"{prefix}num_cards_bought"] = float(len(player.built))
+
+    # Pad features for missing players with zeros
+    for player_idx in range(num_players, 4):
+        prefix = f"player{player_idx}_"
+        features[f"{prefix}vp"] = 0.0
+        features[f"{prefix}total_gems_reduction"] = 0.0
+        features[f"{prefix}buying_capacity"] = 0.0
+        features[f"{prefix}total_gems_possessed"] = 0.0
+        features[f"{prefix}total_gem_colors_possessed"] = 0.0
+        features[f"{prefix}num_reserved_cards"] = 0.0
+        features[f"{prefix}num_nobles_acquired"] = 0.0
+        features[f"{prefix}num_cards_bought"] = 0.0
 
     # Global features
     max_vp = max(player_vps)
@@ -516,6 +569,8 @@ def extract_game_progression_features(row: pd.Series, board: Board) -> FeatureDi
     """
     features: FeatureDict = {}
 
+    num_players = len(board.players)
+
     # Global features
     max_vp = max(player.vp for player in board.players)
     features["distance_to_end_game"] = float(VP_GOAL - max_vp)
@@ -527,10 +582,14 @@ def extract_game_progression_features(row: pd.Series, board: Board) -> FeatureDi
     total_cards_bought = sum(len(player.built) for player in board.players)
     features["total_cards_bought"] = float(total_cards_bought)
 
-    # Per player
-    for player_idx in range(4):
+    # Per player - actual players
+    for player_idx in range(num_players):
         player = board.players[player_idx]
         features[f"player{player_idx}_vp_to_win"] = float(VP_GOAL - player.vp)
+
+    # Pad features for missing players with zeros
+    for player_idx in range(num_players, 4):
+        features[f"player{player_idx}_vp_to_win"] = 0.0
 
     return features
 
