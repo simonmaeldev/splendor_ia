@@ -45,6 +45,7 @@ from .utils import (
     get_num_gem_removal_classes,
     set_seed,
 )
+from .feature_engineering import extract_all_features, get_all_feature_names
 
 
 def load_config(config_path: str) -> Dict:
@@ -371,15 +372,15 @@ def identify_column_groups(df: pd.DataFrame) -> Tuple[List[str], List[str], List
 
 def engineer_features(
     df: pd.DataFrame, feature_cols: List[str],
-) -> Tuple[pd.DataFrame, List[str], List[str]]:
-    """Perform feature engineering including one-hot encoding of categorical variables.
+) -> Tuple[pd.DataFrame, List[str], List[str], List[str]]:
+    """Perform feature engineering including one-hot encoding and strategic features.
 
     Args:
         df: DataFrame with all data
         feature_cols: List of feature column names
 
     Returns:
-        Tuple of (engineered_df, new_feature_cols, onehot_col_names)
+        Tuple of (engineered_df, new_feature_cols, onehot_col_names, strategic_col_names)
 
     """
     print("\nEngineering features...")
@@ -429,25 +430,64 @@ def engineer_features(
         new_feature_cols.append("turn_number")
 
     print(f"  Created {len(onehot_cols)} one-hot encoded features")
-    print(f"  Total features after engineering: {len(new_feature_cols)}")
+    print(f"  Total features after one-hot encoding: {len(new_feature_cols)}")
 
-    return df_eng, new_feature_cols, onehot_cols
+    # Extract strategic features (token, card, noble, player comparison, game progression)
+    print("\n  Extracting strategic features...")
+    strategic_features_list = []
+
+    for idx, row in tqdm(df_eng.iterrows(), total=len(df_eng), desc="  Extracting strategic features"):
+        features = extract_all_features(row)
+        strategic_features_list.append(features)
+
+    # Convert list of dicts to DataFrame
+    strategic_df = pd.DataFrame(strategic_features_list)
+
+    # Get expected feature names and fill missing columns with zeros
+    expected_feature_names = get_all_feature_names()
+    for feat_name in expected_feature_names:
+        if feat_name not in strategic_df.columns:
+            strategic_df[feat_name] = 0.0
+
+    # Reorder columns to match expected order
+    strategic_df = strategic_df[expected_feature_names]
+
+    # Add strategic features to dataframe
+    df_eng = pd.concat([df_eng, strategic_df], axis=1)
+
+    # Add strategic feature names to feature list
+    strategic_cols = list(strategic_df.columns)
+    new_feature_cols.extend(strategic_cols)
+
+    print(f"  Created {len(strategic_cols)} strategic features")
+    print(f"  Total features after all engineering: {len(new_feature_cols)}")
+
+    return df_eng, new_feature_cols, onehot_cols, strategic_cols
 
 
 def create_normalization_mask(
-    feature_cols: List[str], onehot_cols: List[str],
+    feature_cols: List[str], onehot_cols: List[str], strategic_cols: List[str],
 ) -> np.ndarray:
     """Create boolean mask indicating which features should be normalized.
 
     Args:
         feature_cols: List of all feature column names
         onehot_cols: List of one-hot encoded column names
+        strategic_cols: List of strategic feature column names
 
     Returns:
         Boolean array where True = normalize this feature
 
     """
     mask = np.ones(len(feature_cols), dtype=bool)
+
+    # Binary strategic features that should NOT be normalized
+    binary_strategic_patterns = [
+        'can_build',
+        'must_use_gold',
+        'acquirable',
+        'can_take2_',
+    ]
 
     for idx, col in enumerate(feature_cols):
         # Don't normalize one-hot encoded columns
@@ -461,8 +501,12 @@ def create_normalization_mask(
         if 'position' in col:
             mask[idx] = False
 
+        # Don't normalize binary strategic features
+        if any(pattern in col for pattern in binary_strategic_patterns):
+            mask[idx] = False
+
     print(
-        f"\nNormalization mask: {np.sum(mask)} continuous features, {len(mask) - np.sum(mask)} binary features",
+        f"\nNormalization mask: {np.sum(mask)} continuous features, {len(mask) - np.sum(mask)} binary/discrete features",
     )
 
     return mask
@@ -565,7 +609,6 @@ def generate_masks_for_dataframe(df: pd.DataFrame) -> Dict[str, np.ndarray]:
         >>> masks['card_selection'].shape  # (n_samples, 15)
     """
     print("\nGenerating legal action masks...")
-    print("  This may take 20-40 minutes for ~1.7M samples...")
 
     # Initialize lists for each head
     head_names = ['action_type', 'card_selection', 'card_reservation',
@@ -1048,11 +1091,11 @@ def main():
     # Identify column groups
     metadata_cols, label_cols, feature_cols = identify_column_groups(df_compacted)
 
-    # Engineer features (one-hot encoding)
-    df_eng, feature_cols_eng, onehot_cols = engineer_features(df_compacted, feature_cols)
+    # Engineer features (one-hot encoding + strategic features)
+    df_eng, feature_cols_eng, onehot_cols, strategic_cols = engineer_features(df_compacted, feature_cols)
 
     # Create normalization mask
-    norm_mask = create_normalization_mask(feature_cols_eng, onehot_cols)
+    norm_mask = create_normalization_mask(feature_cols_eng, onehot_cols, strategic_cols)
 
     # Encode labels (from filled dataframe)
     labels_all = encode_labels(df_eng, label_cols)
