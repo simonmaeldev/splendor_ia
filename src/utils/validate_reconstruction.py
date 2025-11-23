@@ -22,11 +22,11 @@ from typing import List, Dict, Any, Optional, Tuple
 import math
 
 # Import game objects
-from splendor.cards import Card
-from splendor.characters import Character
-from splendor.board import Board
-from splendor.move import Move
-from splendor.constants import WHITE, BLUE, GREEN, RED, BLACK, GOLD, BUILD, RESERVE, TOKENS
+from src.splendor.cards import Card
+from src.splendor.characters import Character
+from src.splendor.board import Board
+from src.splendor.move import Move
+from src.splendor.constants import WHITE, BLUE, GREEN, RED, BLACK, GOLD, BUILD, RESERVE, TOKENS
 
 
 def parse_action_from_csv(row: Dict[str, Any], board: Board) -> Move:
@@ -193,7 +193,7 @@ def encode_board_state(board: Board, turn_num: int) -> List[float]:
         >>> len(features) == 382
         True
     """
-    from splendor.csv_exporter import encode_game_state_from_board
+    from src.splendor.csv_exporter import encode_game_state_from_board
     return encode_game_state_from_board(board, turn_num)
 
 

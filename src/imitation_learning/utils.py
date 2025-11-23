@@ -21,10 +21,10 @@ import seaborn as sns
 import torch
 from sklearn.metrics import confusion_matrix as sklearn_confusion_matrix
 
-from splendor.board import Board
-from splendor.constants import BUILD, RESERVE, TOKENS
-from splendor.move import Move
-from splendor.cards import Card
+from src.splendor.board import Board
+from src.splendor.constants import BUILD, RESERVE, TOKENS
+from src.splendor.move import Move
+from src.splendor.cards import Card
 
 # Add parent directory to path to access utils package
 sys.path.insert(0, str(Path(__file__).parent.parent))

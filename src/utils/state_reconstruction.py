@@ -30,11 +30,11 @@ from typing import List, Dict, Any, Optional
 import math
 
 # Import game objects
-from splendor.cards import Card
-from splendor.characters import Character
-from splendor.player import Player
-from splendor.board import Board
-from splendor.constants import DECK1, DECK2, DECK3
+from src.splendor.cards import Card
+from src.splendor.characters import Character
+from src.splendor.player import Player
+from src.splendor.board import Board
+from src.splendor.constants import DECK1, DECK2, DECK3
 
 
 def parse_card_features(features: List[float]) -> Optional[Card]:
@@ -365,7 +365,7 @@ def reconstruct_board_from_features(features: List[float]) -> Board:
         >>> moves = board.getMoves()
     """
     # Import here to avoid circular dependency
-    from splendor.csv_exporter import generate_input_column_headers
+    from src.splendor.csv_exporter import generate_input_column_headers
 
     # Create dictionary mapping feature names to values
     headers = generate_input_column_headers()
