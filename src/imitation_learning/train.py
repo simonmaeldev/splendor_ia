@@ -27,7 +27,7 @@ import yaml
 
 from .dataset import create_dataloaders
 from .model import MultiHeadSplendorNet
-from .utils import set_seed, compute_accuracy, plot_training_curves
+from .utils import set_seed, compute_accuracy, compute_masked_predictions, plot_training_curves
 
 
 def load_config(config_path: str) -> Dict:
@@ -97,19 +97,21 @@ def compute_conditional_loss(
     logits: torch.Tensor,
     labels: torch.Tensor,
     mask: torch.Tensor,
-    weights: Optional[torch.Tensor] = None,
-    legal_masks: Optional[torch.Tensor] = None
+    weights: Optional[torch.Tensor] = None
 ) -> torch.Tensor:
     """
     Compute cross-entropy loss only for samples matching the mask.
+
+    IMPORTANT: This function does NOT apply legal action masking during loss computation.
+    Legal action masking is only applied during inference (accuracy computation) to ensure
+    clean gradient flow and allow the model to learn state→legality relationships naturally
+    from the expert data distribution.
 
     Args:
         logits: Predicted logits of shape (batch_size, num_classes)
         labels: True labels of shape (batch_size,)
         mask: Boolean mask of shape (batch_size,) indicating which samples to include
         weights: Optional class weights
-        legal_masks: Optional legal action masks of shape (batch_size, num_classes)
-                    where 1 = legal, 0 = illegal. If provided, illegal actions are masked.
 
     Returns:
         Scalar loss (0.0 if no valid samples)
@@ -118,15 +120,11 @@ def compute_conditional_loss(
         # No valid samples, return zero loss
         return torch.tensor(0.0, device=logits.device)
 
-    # Apply legal action masking if provided
-    if legal_masks is not None:
-        logits = apply_legal_action_mask(logits, legal_masks)
-
     # Apply sample mask
     logits_masked = logits[mask]
     labels_masked = labels[mask]
 
-    # Compute loss
+    # Compute loss (no legal action masking - expert data only contains legal actions)
     loss = F.cross_entropy(logits_masked, labels_masked, weight=weights)
 
     return loss
@@ -134,18 +132,20 @@ def compute_conditional_loss(
 
 def compute_total_loss(
     outputs: Dict[str, torch.Tensor],
-    labels: Dict[str, torch.Tensor],
-    class_weights: Optional[Dict[str, torch.Tensor]] = None,
-    legal_masks: Optional[Dict[str, torch.Tensor]] = None
+    labels: Dict[str, torch.Tensor]
 ) -> Tuple[torch.Tensor, Dict[str, float]]:
     """
-    Compute total loss across all heads with conditional masking and legal action masking.
+    Compute total loss across all heads with conditional masking.
+
+    IMPORTANT DESIGN DECISION:
+    - NO legal action masking during loss computation (allows clean gradient flow)
+    - NO class weights (conflicts with conditional masking per action type)
+    - Expert data only contains legal actions, so model learns legality naturally
+    - Legal action masking is applied only during inference (accuracy computation)
 
     Args:
         outputs: Dict mapping head name to logits tensor
         labels: Dict mapping head name to label tensor
-        class_weights: Optional dict of class weights per head
-        legal_masks: Optional dict of legal action masks per head (batch_size, n_classes)
 
     Returns:
         Tuple of (total_loss, per_head_losses_dict)
@@ -155,17 +155,10 @@ def compute_total_loss(
     losses = {}
 
     # Action type: always compute (every sample has action type)
-    action_type_weight = class_weights.get('action_type') if class_weights else None
-    action_type_logits = outputs['action_type']
-
-    # Apply legal action mask for action_type
-    if legal_masks is not None and 'action_type' in legal_masks:
-        action_type_logits = apply_legal_action_mask(action_type_logits, legal_masks['action_type'])
-
+    # No masking needed - expert demonstrates only legal action types
     losses['action_type'] = F.cross_entropy(
-        action_type_logits,
-        action_types,
-        weight=action_type_weight
+        outputs['action_type'],
+        action_types
     )
 
     # Card selection: only when action_type == 0 (BUILD) AND label != -1
@@ -173,12 +166,10 @@ def compute_total_loss(
     card_sel_labels = labels['card_selection']
     card_sel_valid = card_sel_labels != -1
     card_sel_mask = build_mask & card_sel_valid
-    card_sel_legal_masks = legal_masks.get('card_selection') if legal_masks else None
     losses['card_selection'] = compute_conditional_loss(
         outputs['card_selection'],
         card_sel_labels,
-        card_sel_mask,
-        legal_masks=card_sel_legal_masks
+        card_sel_mask
     )
 
     # Card reservation: only when action_type == 1 (RESERVE) AND label != -1
@@ -186,12 +177,10 @@ def compute_total_loss(
     card_res_labels = labels['card_reservation']
     card_res_valid = card_res_labels != -1
     card_res_mask = reserve_mask & card_res_valid
-    card_res_legal_masks = legal_masks.get('card_reservation') if legal_masks else None
     losses['card_reservation'] = compute_conditional_loss(
         outputs['card_reservation'],
         card_res_labels,
-        card_res_mask,
-        legal_masks=card_res_legal_masks
+        card_res_mask
     )
 
     # Gem take3: only when action_type == 3 (TAKE3) AND label != -1
@@ -199,12 +188,10 @@ def compute_total_loss(
     gem3_labels = labels['gem_take3']
     gem3_valid = gem3_labels != -1
     gem3_mask = take3_mask & gem3_valid
-    gem3_legal_masks = legal_masks.get('gem_take3') if legal_masks else None
     losses['gem_take3'] = compute_conditional_loss(
         outputs['gem_take3'],
         gem3_labels,
-        gem3_mask,
-        legal_masks=gem3_legal_masks
+        gem3_mask
     )
 
     # Gem take2: only when action_type == 2 (TAKE2) AND label != -1
@@ -212,35 +199,29 @@ def compute_total_loss(
     gem2_labels = labels['gem_take2']
     gem2_valid = gem2_labels != -1
     gem2_mask = take2_mask & gem2_valid
-    gem2_legal_masks = legal_masks.get('gem_take2') if legal_masks else None
     losses['gem_take2'] = compute_conditional_loss(
         outputs['gem_take2'],
         gem2_labels,
-        gem2_mask,
-        legal_masks=gem2_legal_masks
+        gem2_mask
     )
 
     # Noble: only when action_type == 0 (BUILD) AND label != -1
     noble_labels = labels['noble']
     noble_valid = noble_labels != -1
     noble_mask = build_mask & noble_valid
-    noble_legal_masks = legal_masks.get('noble') if legal_masks else None
     losses['noble'] = compute_conditional_loss(
         outputs['noble'],
         noble_labels,
-        noble_mask,
-        legal_masks=noble_legal_masks
+        noble_mask
     )
 
     # Gems removed: only when label != 0 (class 0 = no removal)
     gems_rem_labels = labels['gems_removed']
     gems_rem_mask = gems_rem_labels != 0
-    gems_rem_legal_masks = legal_masks.get('gems_removed') if legal_masks else None
     losses['gems_removed'] = compute_conditional_loss(
         outputs['gems_removed'],
         gems_rem_labels,
-        gems_rem_mask,
-        legal_masks=gems_rem_legal_masks
+        gems_rem_mask
     )
 
     # Total loss is sum of all losses
@@ -257,7 +238,6 @@ def train_one_epoch(
     dataloader: torch.utils.data.DataLoader,
     optimizer: torch.optim.Optimizer,
     device: torch.device,
-    class_weights: Optional[Dict[str, torch.Tensor]] = None,
     gradient_clip_norm: Optional[float] = None
 ) -> Tuple[float, Dict[str, float], Dict[str, float]]:
     """
@@ -268,7 +248,6 @@ def train_one_epoch(
         dataloader: Training data loader
         optimizer: Optimizer
         device: Device to run on
-        class_weights: Optional class weights for each head
         gradient_clip_norm: Optional gradient clipping value
 
     Returns:
@@ -296,8 +275,8 @@ def train_one_epoch(
         # Forward pass
         outputs = model(states)
 
-        # Compute loss with legal action masking
-        total_loss, per_head_losses = compute_total_loss(outputs, labels, class_weights, masks)
+        # Compute loss (no masking during training - clean gradient flow)
+        total_loss, per_head_losses = compute_total_loss(outputs, labels)
 
         # Backward pass
         total_loss.backward()
@@ -314,72 +293,88 @@ def train_one_epoch(
         for name, loss_val in per_head_losses.items():
             losses_accum[name] += loss_val
 
-        # Compute accuracies
+        # Compute accuracies with masked predictions
+        # IMPORTANT: Masking applied here for accuracy ONLY, not for loss (which is already computed)
+        # This happens AFTER backward pass, so it doesn't affect gradients
         action_types = labels['action_type'].cpu().numpy()
 
-        # Action type accuracy (always compute)
-        action_type_preds = outputs['action_type'].argmax(dim=1).cpu().numpy()
+        # Action type accuracy (always compute) - apply legal action mask
+        action_type_preds = compute_masked_predictions(
+            outputs['action_type'], masks['action_type']
+        ).cpu().numpy()
         accuracies_accum['action_type'].append(compute_accuracy(action_type_preds, action_types))
 
-        # Card selection accuracy (only for BUILD actions)
+        # Card selection accuracy (only for BUILD actions) - apply legal action mask
         build_mask = action_types == 0
         card_sel_labels = labels['card_selection'].cpu().numpy()
         card_sel_valid = card_sel_labels != -1
         card_sel_mask = build_mask & card_sel_valid
         if card_sel_mask.any():
-            card_sel_preds = outputs['card_selection'].argmax(dim=1).cpu().numpy()
+            card_sel_preds = compute_masked_predictions(
+                outputs['card_selection'], masks['card_selection']
+            ).cpu().numpy()
             accuracies_accum['card_selection'].append(
                 compute_accuracy(card_sel_preds, card_sel_labels, card_sel_mask)
             )
 
-        # Card reservation accuracy (only for RESERVE actions)
+        # Card reservation accuracy (only for RESERVE actions) - apply legal action mask
         reserve_mask = action_types == 1
         card_res_labels = labels['card_reservation'].cpu().numpy()
         card_res_valid = card_res_labels != -1
         card_res_mask = reserve_mask & card_res_valid
         if card_res_mask.any():
-            card_res_preds = outputs['card_reservation'].argmax(dim=1).cpu().numpy()
+            card_res_preds = compute_masked_predictions(
+                outputs['card_reservation'], masks['card_reservation']
+            ).cpu().numpy()
             accuracies_accum['card_reservation'].append(
                 compute_accuracy(card_res_preds, card_res_labels, card_res_mask)
             )
 
-        # Gem take3 accuracy
+        # Gem take3 accuracy - apply legal action mask
         take3_mask = action_types == 3
         gem3_labels = labels['gem_take3'].cpu().numpy()
         gem3_valid = gem3_labels != -1
         gem3_mask = take3_mask & gem3_valid
         if gem3_mask.any():
-            gem3_preds = outputs['gem_take3'].argmax(dim=1).cpu().numpy()
+            gem3_preds = compute_masked_predictions(
+                outputs['gem_take3'], masks['gem_take3']
+            ).cpu().numpy()
             accuracies_accum['gem_take3'].append(
                 compute_accuracy(gem3_preds, gem3_labels, gem3_mask)
             )
 
-        # Gem take2 accuracy
+        # Gem take2 accuracy - apply legal action mask
         take2_mask = action_types == 2
         gem2_labels = labels['gem_take2'].cpu().numpy()
         gem2_valid = gem2_labels != -1
         gem2_mask = take2_mask & gem2_valid
         if gem2_mask.any():
-            gem2_preds = outputs['gem_take2'].argmax(dim=1).cpu().numpy()
+            gem2_preds = compute_masked_predictions(
+                outputs['gem_take2'], masks['gem_take2']
+            ).cpu().numpy()
             accuracies_accum['gem_take2'].append(
                 compute_accuracy(gem2_preds, gem2_labels, gem2_mask)
             )
 
-        # Noble accuracy
+        # Noble accuracy - apply legal action mask
         noble_labels = labels['noble'].cpu().numpy()
         noble_valid = noble_labels != -1
         noble_mask = build_mask & noble_valid
         if noble_mask.any():
-            noble_preds = outputs['noble'].argmax(dim=1).cpu().numpy()
+            noble_preds = compute_masked_predictions(
+                outputs['noble'], masks['noble']
+            ).cpu().numpy()
             accuracies_accum['noble'].append(
                 compute_accuracy(noble_preds, noble_labels, noble_mask)
             )
 
-        # Gems removed accuracy
+        # Gems removed accuracy - apply legal action mask
         gems_rem_labels = labels['gems_removed'].cpu().numpy()
         gems_rem_mask = gems_rem_labels != 0
         if gems_rem_mask.any():
-            gems_rem_preds = outputs['gems_removed'].argmax(dim=1).cpu().numpy()
+            gems_rem_preds = compute_masked_predictions(
+                outputs['gems_removed'], masks['gems_removed']
+            ).cpu().numpy()
             accuracies_accum['gems_removed'].append(
                 compute_accuracy(gems_rem_preds, gems_rem_labels, gems_rem_mask)
             )
@@ -436,8 +431,8 @@ def validate(
             # Forward pass
             outputs = model(states)
 
-            # Compute loss with legal action masking
-            total_loss, per_head_losses = compute_total_loss(outputs, labels, legal_masks=masks)
+            # Compute loss (no masking - consistent with training)
+            total_loss, per_head_losses = compute_total_loss(outputs, labels)
 
             # Accumulate losses
             total_loss_accum += total_loss.item()
@@ -445,72 +440,88 @@ def validate(
                 losses_accum[name] += loss_val
             num_batches += 1
 
-            # Compute accuracies
+            # Compute accuracies with masked predictions (same as training)
+            # IMPORTANT: Masking applied for accuracy computation only, ensuring
+            # train/val metrics are comparable
             action_types = labels['action_type'].cpu().numpy()
 
-            # Action type accuracy (always compute)
-            action_type_preds = outputs['action_type'].argmax(dim=1).cpu().numpy()
+            # Action type accuracy (always compute) - apply legal action mask
+            action_type_preds = compute_masked_predictions(
+                outputs['action_type'], masks['action_type']
+            ).cpu().numpy()
             accuracies_accum['action_type'].append(compute_accuracy(action_type_preds, action_types))
 
-            # Card selection accuracy (only for BUILD actions)
+            # Card selection accuracy (only for BUILD actions) - apply legal action mask
             build_mask = action_types == 0
             card_sel_labels = labels['card_selection'].cpu().numpy()
             card_sel_valid = card_sel_labels != -1
             card_sel_mask = build_mask & card_sel_valid
             if card_sel_mask.any():
-                card_sel_preds = outputs['card_selection'].argmax(dim=1).cpu().numpy()
+                card_sel_preds = compute_masked_predictions(
+                    outputs['card_selection'], masks['card_selection']
+                ).cpu().numpy()
                 accuracies_accum['card_selection'].append(
                     compute_accuracy(card_sel_preds, card_sel_labels, card_sel_mask)
                 )
 
-            # Card reservation accuracy (only for RESERVE actions)
+            # Card reservation accuracy (only for RESERVE actions) - apply legal action mask
             reserve_mask = action_types == 1
             card_res_labels = labels['card_reservation'].cpu().numpy()
             card_res_valid = card_res_labels != -1
             card_res_mask = reserve_mask & card_res_valid
             if card_res_mask.any():
-                card_res_preds = outputs['card_reservation'].argmax(dim=1).cpu().numpy()
+                card_res_preds = compute_masked_predictions(
+                    outputs['card_reservation'], masks['card_reservation']
+                ).cpu().numpy()
                 accuracies_accum['card_reservation'].append(
                     compute_accuracy(card_res_preds, card_res_labels, card_res_mask)
                 )
 
-            # Gem take3 accuracy
+            # Gem take3 accuracy - apply legal action mask
             take3_mask = action_types == 3
             gem3_labels = labels['gem_take3'].cpu().numpy()
             gem3_valid = gem3_labels != -1
             gem3_mask = take3_mask & gem3_valid
             if gem3_mask.any():
-                gem3_preds = outputs['gem_take3'].argmax(dim=1).cpu().numpy()
+                gem3_preds = compute_masked_predictions(
+                    outputs['gem_take3'], masks['gem_take3']
+                ).cpu().numpy()
                 accuracies_accum['gem_take3'].append(
                     compute_accuracy(gem3_preds, gem3_labels, gem3_mask)
                 )
 
-            # Gem take2 accuracy
+            # Gem take2 accuracy - apply legal action mask
             take2_mask = action_types == 2
             gem2_labels = labels['gem_take2'].cpu().numpy()
             gem2_valid = gem2_labels != -1
             gem2_mask = take2_mask & gem2_valid
             if gem2_mask.any():
-                gem2_preds = outputs['gem_take2'].argmax(dim=1).cpu().numpy()
+                gem2_preds = compute_masked_predictions(
+                    outputs['gem_take2'], masks['gem_take2']
+                ).cpu().numpy()
                 accuracies_accum['gem_take2'].append(
                     compute_accuracy(gem2_preds, gem2_labels, gem2_mask)
                 )
 
-            # Noble accuracy
+            # Noble accuracy - apply legal action mask
             noble_labels = labels['noble'].cpu().numpy()
             noble_valid = noble_labels != -1
             noble_mask = build_mask & noble_valid
             if noble_mask.any():
-                noble_preds = outputs['noble'].argmax(dim=1).cpu().numpy()
+                noble_preds = compute_masked_predictions(
+                    outputs['noble'], masks['noble']
+                ).cpu().numpy()
                 accuracies_accum['noble'].append(
                     compute_accuracy(noble_preds, noble_labels, noble_mask)
                 )
 
-            # Gems removed accuracy
+            # Gems removed accuracy - apply legal action mask
             gems_rem_labels = labels['gems_removed'].cpu().numpy()
             gems_rem_mask = gems_rem_labels != 0
             if gems_rem_mask.any():
-                gems_rem_preds = outputs['gems_removed'].argmax(dim=1).cpu().numpy()
+                gems_rem_preds = compute_masked_predictions(
+                    outputs['gems_removed'], masks['gems_removed']
+                ).cpu().numpy()
                 accuracies_accum['gems_removed'].append(
                     compute_accuracy(gems_rem_preds, gems_rem_labels, gems_rem_mask)
                 )

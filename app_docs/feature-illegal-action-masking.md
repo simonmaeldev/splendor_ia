@@ -6,19 +6,25 @@
 
 ## Overview
 
-This feature adds comprehensive illegal action masking to the imitation learning pipeline, ensuring the neural network only predicts legal moves during training and evaluation. The system generates binary masks for each prediction head by reconstructing board states and calling `board.getMoves()`, then applies these masks during loss computation and inference.
+This feature adds comprehensive illegal action masking to the imitation learning pipeline, ensuring the neural network only predicts legal moves during inference and evaluation. The system generates binary masks for each prediction head by reconstructing board states and calling `board.getMoves()`, then applies these masks **only during accuracy calculation and inference** (NOT during loss computation).
 
-Illegal action masking dramatically improves model quality by:
-- Preventing the model from learning to predict impossible moves
-- Guaranteeing 100% rule-compliant predictions during inference
-- Reducing training noise from infeasible actions
-- Enabling fair evaluation metrics that only consider legal options
+**IMPORTANT DESIGN CHANGE (2025-11-23):** Masks are NO LONGER applied during loss computation. Instead:
+- Expert demonstrations naturally teach legality (expert never demonstrates illegal actions)
+- Model learns state→legality relationships through the data distribution
+- Masks applied only during accuracy/inference as a safety mechanism
+- This enables clean gradient flow and better convergence
+
+Illegal action masking provides:
+- Guarantees 100% rule-compliant predictions during inference (safety mechanism)
+- Fair evaluation metrics that only consider legal options
+- Natural learning of legality from expert demonstrations
+- Clean gradient flow during training
 
 ## What Was Built
 
 - **Mask Generation Pipeline**: Comprehensive system to generate legal action masks for all 7 prediction heads during preprocessing
-- **Mask Application in Training**: Integration of masks into loss computation via logit masking (-1e9 for illegal actions)
-- **Mask Application in Evaluation**: Mask-aware prediction and accuracy computation during model evaluation
+- **Mask Application in Accuracy/Inference**: Integration of masks into accuracy computation and inference via `compute_masked_predictions()` helper
+- **NO Mask Application in Loss**: Loss computation uses raw logits to enable clean gradient flow and natural learning
 - **Preprocessing Integration**: Seamless mask generation, validation, and storage alongside features/labels
 - **Mask Validation System**: Verification that 100% of labeled actions are legal (critical data integrity check)
 - **Performance Optimization**: Early returns and single-pass move processing to minimize overhead
@@ -27,11 +33,11 @@ Illegal action masking dramatically improves model quality by:
 
 ### Files Modified
 
-- `src/imitation_learning/utils.py`: Added 10 mask generation functions (`get_mask_from_move_*`) and main entry point `generate_all_masks_from_row()` (src/imitation_learning/utils.py:536-799)
+- `src/imitation_learning/utils.py`: Added 10 mask generation functions (`get_mask_from_move_*`), main entry point `generate_all_masks_from_row()`, and `compute_masked_predictions()` helper for inference-time masking
 - `src/imitation_learning/data_preprocessing.py`: Added `generate_masks_for_dataframe()`, `validate_masks()`, modified data loading to preserve NaN, integrated mask generation into main pipeline (398+ lines added)
 - `src/imitation_learning/dataset.py`: Modified `SplendorDataset` to load and return masks as third element of batch tuples (63 lines changed)
-- `src/imitation_learning/train.py`: Added `apply_legal_action_mask()` function, modified `compute_conditional_loss()` and `compute_total_loss()` to use masks, updated training loop (88+ lines changed)
-- `src/imitation_learning/evaluate.py`: Modified evaluation to use masks for prediction and accuracy computation (38+ lines changed)
+- `src/imitation_learning/train.py`: **Removed** masking from loss computation, added masked accuracy computation using `compute_masked_predictions()`, updated `compute_conditional_loss()` and `compute_total_loss()` to NOT use masks (171 lines changed)
+- `src/imitation_learning/evaluate.py`: Modified evaluation to use `compute_masked_predictions()` for prediction and accuracy computation (38+ lines changed)
 - `run_preprocessing.py`: Added mask generation flags and single-file processing mode for testing (14 lines added)
 
 ### Key Changes
@@ -44,16 +50,19 @@ Illegal action masking dramatically improves model quality by:
    - Uses single-pass processing over moves with early returns for efficiency
    - Falls back to all-ones masks on error to ensure preprocessing continues
 
-2. **Logit Masking During Training**
-   - `apply_legal_action_mask()` sets illegal actions to -1e9 logit value (src/imitation_learning/train.py:70-92)
-   - Applied before softmax/cross-entropy, resulting in ~0% probability for illegal actions
-   - Integrated into `compute_conditional_loss()` and `compute_total_loss()` (src/imitation_learning/train.py:89-232)
-   - Masks applied to all 7 heads during training: action_type, card_selection, card_reservation, gem_take3, gem_take2, noble, gems_removed
+2. **NO Masking During Loss Computation**
+   - Loss computation uses **raw, unmasked logits** to enable clean gradient flow
+   - `compute_conditional_loss()` and `compute_total_loss()` do NOT apply masks (src/imitation_learning/train.py)
+   - Model learns state→legality relationships naturally from expert data distribution
+   - Expert demonstrations only contain legal actions, so model learns P(illegal|state) ≈ 0 without explicit masking
+   - This prevents corrupted gradients and conflicting optimization signals
 
-3. **Mask-Aware Evaluation**
-   - Modified evaluation loop to apply masks before computing predictions (src/imitation_learning/evaluate.py)
-   - Accuracy metrics now reflect performance on legal actions only
-   - Ensures model never predicts illegal moves during inference
+3. **Mask-Aware Accuracy and Inference**
+   - New `compute_masked_predictions()` helper applies masks AFTER model forward pass (src/imitation_learning/utils.py:324)
+   - Used during accuracy calculation in training and validation (AFTER backward pass, no gradient impact)
+   - Used during inference to guarantee legal predictions
+   - Sets illegal actions to -1e10 before argmax, ensuring only legal actions selected
+   - Accuracy metrics reflect performance on legal actions only
 
 4. **Data Pipeline Integration**
    - `load_all_games()` preserves NaN values (critical for correct reconstruction) (src/imitation_learning/data_preprocessing.py:88-144)
@@ -85,17 +94,23 @@ python run_preprocessing.py configs/preprocessing_config.yaml \
 
 ### Training with Masks
 
-The masks are automatically loaded and applied during training:
+Masks are loaded but **NOT applied during loss computation**:
 
 ```python
 # In train.py
 for states, labels, masks in dataloader:
-    # Masks automatically applied in compute_total_loss()
-    total_loss, losses = compute_total_loss(
-        outputs, labels,
-        class_weights=class_weights,
-        legal_masks=masks  # <-- Masks applied here
+    outputs = model(states)
+
+    # Loss computed WITHOUT masks (clean gradient flow)
+    total_loss, losses = compute_total_loss(outputs, labels)
+    total_loss.backward()
+    optimizer.step()
+
+    # Masks applied ONLY for accuracy (after backward pass)
+    action_type_preds = compute_masked_predictions(
+        outputs['action_type'], masks['action_type']
     )
+    accuracy = compute_accuracy(action_type_preds, labels)
 ```
 
 ### Evaluation with Masks
@@ -219,7 +234,7 @@ for failure in validation_results['failures']:
 
 1. **NaN Preservation**: The preprocessing pipeline MUST preserve NaN values before mask generation. Filling NaN with 0 before reconstruction corrupts the board state by adding phantom nobles, reserved cards, etc.
 
-2. **Mask Format**: Masks are int8 arrays with values {0, 1}. During training, illegal actions (mask=0) get logit value -1e9 ≈ -inf.
+2. **Mask Format**: Masks are int8 arrays with values {0, 1}. During accuracy/inference, illegal actions (mask=0) get logit value -1e10 ≈ -inf before argmax.
 
 3. **Fallback Behavior**: If mask generation fails for a sample, all-ones masks are used (allow all actions). The preprocessing logs track failure rate.
 
@@ -288,7 +303,8 @@ These statistics help validate that masking is working correctly and provide ins
 
 - Mask generation requires board reconstruction, which is relatively expensive
 - Falls back to all-ones masks on error (may allow some illegal actions in rare cases)
-- Does not prevent the model from learning to predict illegal actions, only masks them at inference
+- Model learns legality naturally from expert data - no masking during loss prevents learning
+- Masks serve as safety mechanism during inference, not as training constraint
 - Mask validation reports failures but does not automatically fix corrupted data
 
 ### Future Considerations
