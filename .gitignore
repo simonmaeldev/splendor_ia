@@ -146,3 +146,6 @@ data/processed/
 data/models/
 logs/
 wandb/
+
+# Intermediate batch files
+data/intermediate/*.npz

@@ -22,6 +22,7 @@ import functools
 import gc
 import multiprocessing as mp
 import os
+import pickle
 from pathlib import Path
 from typing import Dict, List, Tuple
 
@@ -34,14 +35,13 @@ from .utils import (
     encode_gem_take3,
     encode_gems_removed,
     generate_all_masks_from_row,
-    get_num_gem_removal_classes,
 )
 from .constants import (
     COMBO_TO_CLASS_TAKE3,
     REMOVAL_TO_CLASS,
-    NUM_GEM_REMOVAL_CLASSES,
 )
-from .feature_engineering import extract_all_features, get_all_feature_names
+from .feature_engineering import extract_all_features
+from .memory_monitor import log_memory_usage
 from utils.state_reconstruction import reconstruct_board_from_csv_row
 
 
@@ -111,8 +111,13 @@ def compact_cards_and_add_position_for_row(row_dict: Dict) -> Dict:
         visible_cards.append((card_idx, card_data, is_nonzero))
 
     # Separate non-zero and zero cards
-    nonzero_cards = [c for c in visible_cards if c[2]]
-    zero_cards = [c for c in visible_cards if not c[2]]
+    nonzero_cards = []
+    zero_cards = []
+    for c in visible_cards:
+        if c[2]:
+            nonzero_cards.append(c)
+        else:
+            zero_cards.append(c)
 
     # Reorder: non-zero first, then zeros
     reordered_cards = nonzero_cards + zero_cards
@@ -239,12 +244,6 @@ def process_single_file(file_path: str, config: Dict) -> Tuple[List, List, List,
         # Load CSV file
         df = pd.read_csv(file_path)
 
-        # Extract game_id from filename
-        game_id = int(Path(file_path).stem)
-        df["game_id"] = game_id
-
-        # No longer generating encoding mappings per file - using constants!
-
         # Accumulate results
         raw_rows = []
         strategic_features_list = []
@@ -283,12 +282,117 @@ def process_single_file(file_path: str, config: Dict) -> Tuple[List, List, List,
         return [], [], [], []
 
 
+def save_batch_to_file(
+    batch_num: int,
+    df: pd.DataFrame,
+    strategic_features: List[Dict],
+    labels: List[Dict],
+    masks: List[Dict],
+    file_paths: List[str],
+    intermediate_dir: str = "data/intermediate"
+) -> str:
+    """Save a batch of processed data to a compressed NPZ file.
+
+    Args:
+        batch_num: Batch number for file naming
+        df: DataFrame with compacted rows
+        strategic_features: List of feature dictionaries
+        labels: List of label dictionaries
+        masks: List of mask dictionaries
+        file_paths: List of file paths in this batch
+        intermediate_dir: Directory to save batch files
+
+    Returns:
+        Path to saved batch file
+    """
+    os.makedirs(intermediate_dir, exist_ok=True)
+
+    batch_file = os.path.join(intermediate_dir, f"batch_{batch_num:04d}.npz")
+
+    # Convert DataFrame to pickle bytes for storage
+    df_pickle = pickle.dumps(df)
+
+    # Create metadata
+    metadata = {
+        'batch_num': batch_num,
+        'num_samples': len(df),
+        'num_files': len(file_paths),
+    }
+
+    # Save to compressed NPZ
+    np.savez_compressed(
+        batch_file,
+        df_pickle=df_pickle,
+        strategic_features=strategic_features,
+        labels=labels,
+        masks=masks,
+        metadata=metadata,
+    )
+
+    print(f"  Saved batch {batch_num} to {batch_file} ({len(df):,} samples)")
+    log_memory_usage(f"After saving batch {batch_num}", force_gc=True)
+
+    return batch_file
+
+
+def load_batch_from_file(batch_file: str) -> Tuple[pd.DataFrame, List[Dict], List[Dict], List[Dict]]:
+    """Load a batch of processed data from NPZ file.
+
+    Args:
+        batch_file: Path to batch NPZ file
+
+    Returns:
+        Tuple of (df, strategic_features, labels, masks)
+    """
+    data = np.load(batch_file, allow_pickle=True)
+
+    # Unpickle DataFrame
+    df = pickle.loads(data['df_pickle'].item())
+
+    # Extract lists (stored as numpy arrays)
+    strategic_features = list(data['strategic_features'])
+    labels = list(data['labels'])
+    masks = list(data['masks'])
+
+    metadata = data['metadata'].item()
+    print(f"  Loaded batch {metadata['batch_num']} from {batch_file} ({metadata['num_samples']:,} samples)")
+
+    return df, strategic_features, labels, masks
+
+
+def delete_batch_files(batch_files: List[str]) -> None:
+    """Delete intermediate batch files.
+
+    Args:
+        batch_files: List of batch file paths to delete
+    """
+    deleted_count = 0
+    failed_count = 0
+
+    for batch_file in batch_files:
+        try:
+            if os.path.exists(batch_file):
+                os.remove(batch_file)
+                deleted_count += 1
+        except Exception as e:
+            print(f"  Warning: Failed to delete {batch_file}: {e}")
+            failed_count += 1
+
+    if deleted_count > 0:
+        print(f"  Cleaned up {deleted_count} intermediate batch files")
+    if failed_count > 0:
+        print(f"  Warning: Failed to delete {failed_count} batch files")
+
+
 def process_files_parallel(
     file_paths: List[str],
     config: Dict,
     num_workers: int = None
-) -> Tuple[pd.DataFrame, List[Dict], List[Dict], List[Dict]]:
-    """Process multiple files in parallel using multiprocessing.
+) -> List[str]:
+    """Process multiple files in parallel using multiprocessing with batching.
+
+    This function now processes files in batches to avoid memory overflow.
+    Each batch is saved to disk and memory is cleared before the next batch.
 
     Args:
         file_paths: List of CSV file paths
@@ -296,67 +400,113 @@ def process_files_parallel(
         num_workers: Number of worker processes (default: cpu_count() - 2)
 
     Returns:
-        Tuple of (combined_df, strategic_features_list, labels_list, masks_list)
+        List of batch file paths (e.g., ["data/intermediate/batch_0000.npz", ...])
     """
     if num_workers is None:
         num_workers = max(1, mp.cpu_count() - 2)
 
-    print(f"\nProcessing {len(file_paths)} files with {num_workers} workers...")
-
     # Handle empty file list
     if not file_paths:
-        return pd.DataFrame(), [], [], []
+        return []
 
-    all_raw_rows = []
-    all_strategic_features = []
-    all_labels = []
-    all_masks = []
+    # Get batch configuration
+    batch_size = config.get('preprocessing', {}).get('batch_size', 500)
+    intermediate_dir = config.get('preprocessing', {}).get('intermediate_dir', 'data/intermediate')
+    monitor_memory = config.get('preprocessing', {}).get('monitor_memory', False)
 
-    # Use sequential processing for single worker or single file
-    if num_workers == 1 or len(file_paths) == 1:
-        for file_path in tqdm(file_paths, desc="Processing files"):
-            raw_rows, strategic_features, labels, masks = process_single_file(file_path, config)
+    # Split files into batches
+    num_batches = (len(file_paths) + batch_size - 1) // batch_size  # Ceiling division
+    batches = [file_paths[i:i+batch_size] for i in range(0, len(file_paths), batch_size)]
 
-            all_raw_rows.extend(raw_rows)
-            all_strategic_features.extend(strategic_features)
-            all_labels.extend(labels)
-            all_masks.extend(masks)
+    print(f"\nProcessing {len(file_paths)} files with {num_workers} workers...")
+    print(f"Batch configuration: {batch_size} files/batch, {num_batches} batches")
+    print(f"Intermediate directory: {intermediate_dir}")
 
-            # Free memory
-            gc.collect()
-    else:
-        # Use parallel processing with multiprocessing.Pool
-        # Create a partial function with config bound
-        worker_func = functools.partial(process_single_file, config=config)
+    # Ensure intermediate directory exists
+    os.makedirs(intermediate_dir, exist_ok=True)
 
-        # Use context manager to ensure proper cleanup
-        with mp.Pool(processes=num_workers) as pool:
-            # Use imap_unordered for better memory efficiency and progress tracking
-            results_iter = pool.imap_unordered(worker_func, file_paths)
+    batch_file_paths = []
 
-            # Process results as they come in with progress bar
-            for raw_rows, strategic_features, labels, masks in tqdm(
-                results_iter,
-                total=len(file_paths),
-                desc="Processing files"
-            ):
-                all_raw_rows.extend(raw_rows)
-                all_strategic_features.extend(strategic_features)
-                all_labels.extend(labels)
-                all_masks.extend(masks)
+    # Process each batch
+    for batch_num, batch_files in enumerate(batches):
+        print(f"\n{'='*60}")
+        print(f"Processing batch {batch_num + 1}/{num_batches} ({len(batch_files)} files)...")
+        print(f"{'='*60}")
 
-                # Free memory periodically
+        if monitor_memory:
+            log_memory_usage(f"Before batch {batch_num + 1}")
+
+        # Accumulate results for this batch only
+        batch_raw_rows = []
+        batch_strategic_features = []
+        batch_labels = []
+        batch_masks = []
+
+        # Use sequential processing for single worker or single file
+        if num_workers == 1 or len(batch_files) == 1:
+            for file_path in tqdm(batch_files, desc=f"Batch {batch_num + 1}/{num_batches}"):
+                raw_rows, strategic_features, labels, masks = process_single_file(file_path, config)
+
+                batch_raw_rows.extend(raw_rows)
+                batch_strategic_features.extend(strategic_features)
+                batch_labels.extend(labels)
+                batch_masks.extend(masks)
+
+                # Free memory
                 gc.collect()
+        else:
+            # Use parallel processing with multiprocessing.Pool
+            # Create a partial function with config bound
+            worker_func = functools.partial(process_single_file, config=config)
 
-    # Convert raw rows to DataFrame
-    if all_raw_rows:
-        df = pd.DataFrame(all_raw_rows)
-    else:
-        df = pd.DataFrame()
+            # Use context manager to ensure proper cleanup
+            with mp.Pool(processes=num_workers) as pool:
+                # Use imap_unordered for better memory efficiency and progress tracking
+                results_iter = pool.imap_unordered(worker_func, batch_files)
 
-    print(f"\nProcessed {len(all_raw_rows)} total samples")
+                # Process results as they come in with progress bar
+                for raw_rows, strategic_features, labels, masks in tqdm(
+                    results_iter,
+                    total=len(batch_files),
+                    desc=f"Batch {batch_num + 1}/{num_batches}"
+                ):
+                    batch_raw_rows.extend(raw_rows)
+                    batch_strategic_features.extend(strategic_features)
+                    batch_labels.extend(labels)
+                    batch_masks.extend(masks)
 
-    return df, all_strategic_features, all_labels, all_masks
+                    # Free memory periodically
+                    gc.collect()
+
+        # Convert batch raw rows to DataFrame
+        if batch_raw_rows:
+            batch_df = pd.DataFrame(batch_raw_rows)
+        else:
+            batch_df = pd.DataFrame()
+
+        print(f"\nBatch {batch_num + 1} processed {len(batch_raw_rows):,} samples")
+
+        # Save batch to file
+        batch_file = save_batch_to_file(
+            batch_num=batch_num,
+            df=batch_df,
+            strategic_features=batch_strategic_features,
+            labels=batch_labels,
+            masks=batch_masks,
+            file_paths=batch_files,
+            intermediate_dir=intermediate_dir
+        )
+        batch_file_paths.append(batch_file)
+
+        # Clear batch data from memory
+        del batch_raw_rows, batch_strategic_features, batch_labels, batch_masks, batch_df
+        gc.collect()
+
+    print(f"\n{'='*60}")
+    print(f"All {num_batches} batches processed and saved")
+    print(f"{'='*60}\n")
+
+    return batch_file_paths
 
 
 def discover_csv_files(data_root: str, max_games: int = None) -> List[str]:

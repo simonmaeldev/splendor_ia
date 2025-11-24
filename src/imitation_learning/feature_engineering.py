@@ -25,17 +25,14 @@ Example usage:
 
 import sys
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List
 
-import numpy as np
 import pandas as pd
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from splendor.board import Board
-from splendor.cards import Card
-from splendor.characters import Character
 from splendor.constants import (
     GOLD,
     MAX_NB_TOKENS,
@@ -44,20 +41,17 @@ from splendor.constants import (
     NB_TOKEN_4,
     VP_GOAL,
 )
-from splendor.player import Player
-from utils.state_reconstruction import reconstruct_board_from_csv_row
 
 # Type aliases
 FeatureDict = Dict[str, float]
 
 
-def extract_all_features(row: pd.Series, board: 'Board' = None) -> FeatureDict:
+def extract_all_features(row: pd.Series, board: Board) -> FeatureDict:
     """Main entry point: extract all strategic features from a game state.
 
     Args:
         row: Pandas Series containing raw game state from CSV
-        board: Optional pre-reconstructed Board object (optimization to avoid redundant reconstruction)
-               If None, will reconstruct from row (backward compatible)
+        board: pre-reconstructed Board object 
 
     Returns:
         Dictionary mapping feature names to float values
@@ -74,10 +68,6 @@ def extract_all_features(row: pd.Series, board: 'Board' = None) -> FeatureDict:
     features: FeatureDict = {}
 
     try:
-        # Reconstruct board state from CSV if not provided
-        if board is None:
-            board = reconstruct_board_from_csv_row(row.to_dict())
-
         # Extract all feature categories
         features.update(extract_token_features(row, board))
         features.update(extract_card_features(row, board))

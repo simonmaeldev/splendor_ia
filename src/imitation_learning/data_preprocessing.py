@@ -35,6 +35,11 @@ from sklearn.model_selection import GroupShuffleSplit
 from sklearn.preprocessing import StandardScaler
 from tqdm import tqdm
 
+from .constants import (
+    COMBO_TO_CLASS_TAKE3,
+    REMOVAL_TO_CLASS,
+)
+from .feature_engineering import extract_all_features, get_all_feature_names
 from .utils import (
     encode_gem_take2,
     encode_gem_take3,
@@ -43,14 +48,7 @@ from .utils import (
     get_num_gem_removal_classes,
     set_seed,
 )
-from .constants import (
-    CLASS_TO_COMBO_TAKE3,
-    COMBO_TO_CLASS_TAKE3,
-    CLASS_TO_REMOVAL,
-    REMOVAL_TO_CLASS,
-)
-from .feature_engineering import extract_all_features, get_all_feature_names
-from .memory_monitor import log_memory_usage, MemoryTracker
+
 
 
 def load_config(config_path: str) -> Dict:
@@ -72,6 +70,7 @@ def load_single_game(csv_path: str) -> pd.DataFrame:
     Example:
         >>> df = load_single_game("data/games/3_games/5444.csv")
         >>> print(f"Loaded {len(df)} samples")
+
     """
     print(f"\nLoading single CSV file: {csv_path}...")
 
@@ -174,25 +173,43 @@ def fill_nan_values(df: pd.DataFrame) -> pd.DataFrame:
 
     Returns:
         DataFrame with NaN filled for feature columns only
+
     """
-    print(f"\nFilling NaN values...")
+    print("\nFilling NaN values...")
     print(f"  Before fillna: {df.isna().sum().sum()} NaN values")
 
     # Label columns that should keep NaN (will be converted to -1 later)
     label_cols_to_keep_nan = [
-        'card_selection', 'card_reservation', 'noble_selection',
-        'gem_take3_white', 'gem_take3_blue', 'gem_take3_green', 'gem_take3_red', 'gem_take3_black',
-        'gem_take2_white', 'gem_take2_blue', 'gem_take2_green', 'gem_take2_red', 'gem_take2_black',
-        'gems_removed_white', 'gems_removed_blue', 'gems_removed_green', 'gems_removed_red', 'gems_removed_black', 'gems_removed_gold',
+        "card_selection",
+        "card_reservation",
+        "noble_selection",
+        "gem_take3_white",
+        "gem_take3_blue",
+        "gem_take3_green",
+        "gem_take3_red",
+        "gem_take3_black",
+        "gem_take2_white",
+        "gem_take2_blue",
+        "gem_take2_green",
+        "gem_take2_red",
+        "gem_take2_black",
+        "gems_removed_white",
+        "gems_removed_blue",
+        "gems_removed_green",
+        "gems_removed_red",
+        "gems_removed_black",
+        "gems_removed_gold",
     ]
 
     # Fill NaN for non-label columns (structured padding for fewer players/nobles)
     df_filled = df.copy()
     for col in df_filled.columns:
-        if col not in label_cols_to_keep_nan and col != 'action_type':
+        if col not in label_cols_to_keep_nan and col != "action_type":
             df_filled[col] = df_filled[col].fillna(0)
 
-    print(f"  After fillna: {df_filled.isna().sum().sum()} NaN values (label columns only)")
+    print(
+        f"  After fillna: {df_filled.isna().sum().sum()} NaN values (label columns only)",
+    )
 
     return df_filled
 
@@ -211,15 +228,27 @@ def compact_cards_and_add_position(df: pd.DataFrame) -> pd.DataFrame:
 
     Returns:
         DataFrame with compacted cards and position features added
+
     """
     print("\nCompacting cards and adding position indices...")
 
     df_compacted = df.copy()
 
     # Card feature names (excluding position which we'll add)
-    card_feature_names = ['vp', 'level', 'cost_white', 'cost_blue', 'cost_green',
-                          'cost_red', 'cost_black', 'bonus_white', 'bonus_blue',
-                          'bonus_green', 'bonus_red', 'bonus_black']
+    card_feature_names = [
+        "vp",
+        "level",
+        "cost_white",
+        "cost_blue",
+        "cost_green",
+        "cost_red",
+        "cost_black",
+        "bonus_white",
+        "bonus_blue",
+        "bonus_green",
+        "bonus_red",
+        "bonus_black",
+    ]
 
     # Process visible cards (card0 to card11)
     print("  Processing visible cards (0-11)...")
@@ -227,7 +256,7 @@ def compact_cards_and_add_position(df: pd.DataFrame) -> pd.DataFrame:
     # Extract all visible card features as a 3D array: (n_samples, 12 cards, 12 features)
     visible_card_data = []
     for card_idx in range(12):
-        card_cols = [f'card{card_idx}_{feat}' for feat in card_feature_names]
+        card_cols = [f"card{card_idx}_{feat}" for feat in card_feature_names]
         card_values = df_compacted[card_cols].values  # (n_samples, 12)
         visible_card_data.append(card_values)
 
@@ -255,24 +284,30 @@ def compact_cards_and_add_position(df: pd.DataFrame) -> pd.DataFrame:
         compacted_visible[sample_idx] = visible_card_data[sample_idx, reordered_indices]
 
         # Assign position indices: 0, 1, 2, ... for non-zero, -1 for zeros
-        position_indices[sample_idx, :len(nonzero_indices)] = np.arange(len(nonzero_indices))
+        position_indices[sample_idx, : len(nonzero_indices)] = np.arange(
+            len(nonzero_indices),
+        )
 
     # Write back to dataframe
     # First, drop old card columns
     old_card_cols = []
     for card_idx in range(12):
-        old_card_cols.extend([f'card{card_idx}_{feat}' for feat in card_feature_names])
+        old_card_cols.extend([f"card{card_idx}_{feat}" for feat in card_feature_names])
     df_compacted = df_compacted.drop(columns=old_card_cols)
 
     # Build new columns efficiently using dict to avoid fragmentation
     new_cols = {}
     for card_idx in range(12):
         # Add position column
-        new_cols[f'card{card_idx}_position'] = position_indices[:, card_idx]
+        new_cols[f"card{card_idx}_position"] = position_indices[:, card_idx]
 
         # Add feature columns
         for feat_idx, feat_name in enumerate(card_feature_names):
-            new_cols[f'card{card_idx}_{feat_name}'] = compacted_visible[:, card_idx, feat_idx]
+            new_cols[f"card{card_idx}_{feat_name}"] = compacted_visible[
+                :,
+                card_idx,
+                feat_idx,
+            ]
 
     # Concatenate all new columns at once
     df_compacted = pd.concat([df_compacted, pd.DataFrame(new_cols)], axis=1)
@@ -289,8 +324,10 @@ def compact_cards_and_add_position(df: pd.DataFrame) -> pd.DataFrame:
     for player_idx in range(4):
         for reserved_idx in range(3):
             # Extract reserved card features
-            reserved_cols = [f'player{player_idx}_reserved{reserved_idx}_{feat}'
-                           for feat in card_feature_names]
+            reserved_cols = [
+                f"player{player_idx}_reserved{reserved_idx}_{feat}"
+                for feat in card_feature_names
+            ]
             reserved_values = df_compacted[reserved_cols].values  # (n_samples, 12)
             old_reserved_cols.extend(reserved_cols)
 
@@ -302,20 +339,23 @@ def compact_cards_and_add_position(df: pd.DataFrame) -> pd.DataFrame:
             position_col = np.where(is_present, position, -1)
 
             # Add position column first
-            col_prefix = f'player{player_idx}_reserved{reserved_idx}'
-            new_reserved_cols[f'{col_prefix}_position'] = position_col
+            col_prefix = f"player{player_idx}_reserved{reserved_idx}"
+            new_reserved_cols[f"{col_prefix}_position"] = position_col
 
             # Add back feature columns
             for feat_idx, feat_name in enumerate(card_feature_names):
-                new_reserved_cols[f'{col_prefix}_{feat_name}'] = reserved_values[:, feat_idx]
+                new_reserved_cols[f"{col_prefix}_{feat_name}"] = reserved_values[
+                    :,
+                    feat_idx,
+                ]
 
     # Drop old columns and add new ones efficiently
     df_compacted = df_compacted.drop(columns=old_reserved_cols)
     df_compacted = pd.concat([df_compacted, pd.DataFrame(new_reserved_cols)], axis=1)
 
-    print(f"  Added position indices to all cards")
-    print(f"  Visible cards: 12 cards × 13 features (position + 12) = 156 features")
-    print(f"  Reserved cards per player: 3 cards × 13 features = 39 features")
+    print("  Added position indices to all cards")
+    print("  Visible cards: 12 cards × 13 features (position + 12) = 156 features")
+    print("  Reserved cards per player: 3 cards × 13 features = 39 features")
 
     return df_compacted
 
@@ -376,7 +416,8 @@ def identify_column_groups(df: pd.DataFrame) -> Tuple[List[str], List[str], List
 
 
 def engineer_features(
-    df: pd.DataFrame, feature_cols: List[str],
+    df: pd.DataFrame,
+    feature_cols: List[str],
 ) -> Tuple[pd.DataFrame, List[str], List[str], List[str]]:
     """Perform feature engineering including one-hot encoding and strategic features.
 
@@ -441,7 +482,11 @@ def engineer_features(
     print("\n  Extracting strategic features...")
     strategic_features_list = []
 
-    for idx, row in tqdm(df_eng.iterrows(), total=len(df_eng), desc="  Extracting strategic features"):
+    for idx, row in tqdm(
+        df_eng.iterrows(),
+        total=len(df_eng),
+        desc="  Extracting strategic features",
+    ):
         features = extract_all_features(row)
         strategic_features_list.append(features)
 
@@ -471,7 +516,9 @@ def engineer_features(
 
 
 def create_normalization_mask(
-    feature_cols: List[str], onehot_cols: List[str], strategic_cols: List[str],
+    feature_cols: List[str],
+    onehot_cols: List[str],
+    strategic_cols: List[str],
 ) -> np.ndarray:
     """Create boolean mask indicating which features should be normalized.
 
@@ -488,10 +535,10 @@ def create_normalization_mask(
 
     # Binary strategic features that should NOT be normalized
     binary_strategic_patterns = [
-        'can_build',
-        'must_use_gold',
-        'acquirable',
-        'can_take2_',
+        "can_build",
+        "must_use_gold",
+        "acquirable",
+        "can_take2_",
     ]
 
     for idx, col in enumerate(feature_cols):
@@ -503,7 +550,7 @@ def create_normalization_mask(
             mask[idx] = False
 
         # Don't normalize position indices (discrete values: -1, 0, 1, 2, ...)
-        if 'position' in col:
+        if "position" in col:
             mask[idx] = False
 
         # Don't normalize binary strategic features
@@ -595,8 +642,7 @@ def encode_labels(df: pd.DataFrame, label_cols: List[str]) -> Dict[str, np.ndarr
 
 
 def generate_masks_for_dataframe(df: pd.DataFrame) -> Dict[str, np.ndarray]:
-    """
-    Generate legal action masks for all rows in the dataframe.
+    """Generate legal action masks for all rows in the dataframe.
 
     For each row, reconstructs the board state and generates masks indicating
     which actions are legal for each prediction head.
@@ -612,12 +658,20 @@ def generate_masks_for_dataframe(df: pd.DataFrame) -> Dict[str, np.ndarray]:
         >>> masks = generate_masks_for_dataframe(df)
         >>> masks['action_type'].shape  # (n_samples, 4)
         >>> masks['card_selection'].shape  # (n_samples, 15)
+
     """
     print("\nGenerating legal action masks...")
 
     # Initialize lists for each head
-    head_names = ['action_type', 'card_selection', 'card_reservation',
-                  'gem_take3', 'gem_take2', 'noble', 'gems_removed']
+    head_names = [
+        "action_type",
+        "card_selection",
+        "card_reservation",
+        "gem_take3",
+        "gem_take2",
+        "noble",
+        "gems_removed",
+    ]
     masks_per_head = {head: [] for head in head_names}
 
     # Track failures
@@ -639,18 +693,22 @@ def generate_masks_for_dataframe(df: pd.DataFrame) -> Dict[str, np.ndarray]:
         except Exception as e:
             # This should be caught by generate_all_masks_from_row, but double-check
             failure_count += 1
-            game_id = row.get('game_id', 'unknown')
-            turn_num = row.get('turn_number', 'unknown')
-            print(f"\nERROR: Mask generation failed for game_id={game_id}, turn={turn_num}: {e}")
+            game_id = row.get("game_id", "unknown")
+            turn_num = row.get("turn_number", "unknown")
+            print(
+                f"\nERROR: Mask generation failed for game_id={game_id}, turn={turn_num}: {e}",
+            )
 
             # Use all-ones fallback
-            masks_per_head['action_type'].append(np.ones(4, dtype=np.int8))
-            masks_per_head['card_selection'].append(np.ones(15, dtype=np.int8))
-            masks_per_head['card_reservation'].append(np.ones(15, dtype=np.int8))
-            masks_per_head['gem_take3'].append(np.ones(26, dtype=np.int8))
-            masks_per_head['gem_take2'].append(np.ones(5, dtype=np.int8))
-            masks_per_head['noble'].append(np.ones(5, dtype=np.int8))
-            masks_per_head['gems_removed'].append(np.ones(get_num_gem_removal_classes(), dtype=np.int8))
+            masks_per_head["action_type"].append(np.ones(4, dtype=np.int8))
+            masks_per_head["card_selection"].append(np.ones(15, dtype=np.int8))
+            masks_per_head["card_reservation"].append(np.ones(15, dtype=np.int8))
+            masks_per_head["gem_take3"].append(np.ones(26, dtype=np.int8))
+            masks_per_head["gem_take2"].append(np.ones(5, dtype=np.int8))
+            masks_per_head["noble"].append(np.ones(5, dtype=np.int8))
+            masks_per_head["gems_removed"].append(
+                np.ones(get_num_gem_removal_classes(), dtype=np.int8),
+            )
 
     # Convert lists to numpy arrays
     masks_dict = {}
@@ -659,8 +717,10 @@ def generate_masks_for_dataframe(df: pd.DataFrame) -> Dict[str, np.ndarray]:
         print(f"  {head}: {masks_dict[head].shape}")
 
     if failure_count > 0:
-        print(f"\n  WARNING: {failure_count} mask generation failures ({failure_count/len(df)*100:.2f}%)")
-        print(f"  Failed samples use all-ones masks (allow all actions)")
+        print(
+            f"\n  WARNING: {failure_count} mask generation failures ({failure_count / len(df) * 100:.2f}%)",
+        )
+        print("  Failed samples use all-ones masks (allow all actions)")
 
     print(f"\n  Successfully generated masks for {len(df):,} samples")
 
@@ -707,7 +767,9 @@ def split_by_game_id(
     temp_game_ids = df.iloc[temp_idx]["game_id"].values
     val_test_ratio = val_ratio / (val_ratio + test_ratio)
     splitter2 = GroupShuffleSplit(
-        n_splits=1, train_size=val_test_ratio, random_state=seed,
+        n_splits=1,
+        train_size=val_test_ratio,
+        random_state=seed,
     )
     val_idx_temp, test_idx_temp = next(
         splitter2.split(df.iloc[temp_idx], groups=temp_game_ids),
@@ -862,7 +924,7 @@ def save_preprocessed_data(
 
     # Compute mask statistics
     mask_stats = {}
-    for head in masks_train.keys():
+    for head in masks_train:
         train_masks = masks_train[head]
         # Average number of legal actions per sample
         avg_legal = float(np.mean(np.sum(train_masks, axis=1)))
@@ -894,9 +956,11 @@ def save_preprocessed_data(
     with open(os.path.join(output_dir, "preprocessing_stats.json"), "w") as f:
         json.dump(stats, f, indent=2)
     print(f"  Saved preprocessing statistics (input_dim={stats['input_dim']})")
-    print(f"\n  Mask statistics:")
+    print("\n  Mask statistics:")
     for head, stats_head in mask_stats.items():
-        print(f"    {head}: avg={stats_head['avg_legal_actions']:.1f}, min={stats_head['min_legal_actions']}, max={stats_head['max_legal_actions']}")
+        print(
+            f"    {head}: avg={stats_head['avg_legal_actions']:.1f}, min={stats_head['min_legal_actions']}, max={stats_head['max_legal_actions']}",
+        )
 
 
 def validate_masks(
@@ -904,8 +968,7 @@ def validate_masks(
     labels: Dict[str, np.ndarray],
     df: pd.DataFrame,
 ) -> Dict[str, any]:
-    """
-    Validate that masks are correct and labeled actions are legal.
+    """Validate that masks are correct and labeled actions are legal.
 
     Critical validation: 100% of labeled actions MUST be legal.
     Any failures indicate data issues or reconstruction bugs.
@@ -920,23 +983,24 @@ def validate_masks(
 
     Raises:
         Warning if any validation failures occur
+
     """
     print("\nValidating masks...")
 
     expected_shapes = {
-        'action_type': 4,
-        'card_selection': 15,
-        'card_reservation': 15,
-        'gem_take3': 26,
-        'gem_take2': 5,
-        'noble': 5,
-        'gems_removed': get_num_gem_removal_classes(),
+        "action_type": 4,
+        "card_selection": 15,
+        "card_reservation": 15,
+        "gem_take3": 26,
+        "gem_take2": 5,
+        "noble": 5,
+        "gems_removed": get_num_gem_removal_classes(),
     }
 
     validation_report = {}
     failures = []
 
-    for head in expected_shapes.keys():
+    for head in expected_shapes:
         if head not in masks:
             print(f"  ERROR: Missing mask for head '{head}'")
             continue
@@ -949,7 +1013,9 @@ def validate_masks(
 
         # Check shape
         if mask.shape != (len(label), expected_classes):
-            print(f"    ERROR: Shape mismatch. Expected {(len(label), expected_classes)}, got {mask.shape}")
+            print(
+                f"    ERROR: Shape mismatch. Expected {(len(label), expected_classes)}, got {mask.shape}",
+            )
             continue
 
         # Check values are binary
@@ -959,7 +1025,7 @@ def validate_masks(
             continue
 
         # Check at least one legal action per sample (for action_type)
-        if head == 'action_type':
+        if head == "action_type":
             zero_masks = np.sum(mask, axis=1) == 0
             if np.any(zero_masks):
                 num_zeros = np.sum(zero_masks)
@@ -982,25 +1048,29 @@ def validate_masks(
 
                 if not is_legal:
                     illegal_count += 1
-                    game_id = df.iloc[idx]['game_id']
-                    turn_num = df.iloc[idx]['turn_number']
-                    illegal_samples.append({
-                        'sample_idx': int(idx),
-                        'game_id': int(game_id),
-                        'turn_number': int(turn_num),
-                        'label_value': int(label_value),
-                        'head': head,
-                    })
+                    game_id = df.iloc[idx]["game_id"]
+                    turn_num = df.iloc[idx]["turn_number"]
+                    illegal_samples.append(
+                        {
+                            "sample_idx": int(idx),
+                            "game_id": int(game_id),
+                            "turn_number": int(turn_num),
+                            "label_value": int(label_value),
+                            "head": head,
+                        },
+                    )
 
             legal_rate = (len(valid_indices) - illegal_count) / len(valid_indices) * 100
 
-            print(f"    Labeled actions legal: {len(valid_indices) - illegal_count}/{len(valid_indices)} ({legal_rate:.2f}%)")
+            print(
+                f"    Labeled actions legal: {len(valid_indices) - illegal_count}/{len(valid_indices)} ({legal_rate:.2f}%)",
+            )
 
             if illegal_count > 0:
                 print(f"    ❌ WARNING: {illegal_count} labeled actions are ILLEGAL!")
                 failures.extend(illegal_samples)
         else:
-            print(f"    No valid labels to check (all -1)")
+            print("    No valid labels to check (all -1)")
 
         # Compute statistics
         avg_legal = np.mean(np.sum(mask, axis=1))
@@ -1008,18 +1078,18 @@ def validate_masks(
         max_legal = np.max(np.sum(mask, axis=1))
 
         validation_report[head] = {
-            'shape_valid': bool(mask.shape == (len(label), expected_classes)),
-            'binary_values': bool(np.all(np.isin(unique_vals, [0, 1]))),
-            'avg_legal_actions': float(avg_legal),
-            'min_legal_actions': int(min_legal),
-            'max_legal_actions': int(max_legal),
-            'illegal_count': int(illegal_count if len(valid_indices) > 0 else 0),
-            'valid_labels_count': int(len(valid_indices)),
-            'legal_rate': float(legal_rate if len(valid_indices) > 0 else 100.0),
+            "shape_valid": bool(mask.shape == (len(label), expected_classes)),
+            "binary_values": bool(np.all(np.isin(unique_vals, [0, 1]))),
+            "avg_legal_actions": float(avg_legal),
+            "min_legal_actions": int(min_legal),
+            "max_legal_actions": int(max_legal),
+            "illegal_count": int(illegal_count if len(valid_indices) > 0 else 0),
+            "valid_labels_count": len(valid_indices),
+            "legal_rate": float(legal_rate if len(valid_indices) > 0 else 100.0),
         }
 
         print(f"    Shape: {mask.shape} ✓")
-        print(f"    Binary values: ✓")
+        print("    Binary values: ✓")
         print(f"    Avg legal actions: {avg_legal:.1f}")
         print(f"    Min/Max legal: {min_legal}/{max_legal}")
 
@@ -1027,28 +1097,37 @@ def validate_masks(
     total_failures = len(failures)
     if total_failures > 0:
         print(f"\n❌ VALIDATION FAILED: {total_failures} labeled actions are illegal!")
-        print(f"   This indicates data quality issues or reconstruction bugs.")
-        print(f"   First 10 failures:")
+        print("   This indicates data quality issues or reconstruction bugs.")
+        print("   First 10 failures:")
         for failure in failures[:10]:
-            print(f"     Game {failure['game_id']}, Turn {failure['turn_number']}, "
-                  f"Head '{failure['head']}', Label {failure['label_value']}")
+            print(
+                f"     Game {failure['game_id']}, Turn {failure['turn_number']}, "
+                f"Head '{failure['head']}', Label {failure['label_value']}",
+            )
 
         # Save failure details
         with open("data/processed/mask_validation_failures.json", "w") as f:
             json.dump(failures, f, indent=2)
-        print(f"\n   Full failure list saved to: data/processed/mask_validation_failures.json")
+        print(
+            "\n   Full failure list saved to: data/processed/mask_validation_failures.json",
+        )
 
-        validation_report['overall_status'] = 'FAILED'
-        validation_report['total_failures'] = total_failures
+        validation_report["overall_status"] = "FAILED"
+        validation_report["total_failures"] = total_failures
     else:
-        print(f"\n✓ Mask validation PASSED! All labeled actions are legal.")
-        validation_report['overall_status'] = 'PASSED'
-        validation_report['total_failures'] = 0
+        print("\n✓ Mask validation PASSED! All labeled actions are legal.")
+        validation_report["overall_status"] = "PASSED"
+        validation_report["total_failures"] = 0
 
     return validation_report
 
 
-def preprocess_with_parallel_processing(config: Dict, max_games: int = None) -> None:
+def preprocess_with_parallel_processing(
+    config: Dict,
+    max_games: int = None,
+    skip_merge: bool = False,
+    cleanup: bool = False,
+) -> None:
     """New optimized preprocessing pipeline using parallel processing.
 
     This pipeline:
@@ -1056,219 +1135,89 @@ def preprocess_with_parallel_processing(config: Dict, max_games: int = None) -> 
     2. Processes files individually with optimized row processing:
        - Reconstructs board once per row
        - Reuses board for both masks and features (50% reduction in reconstructions)
-    3. Accumulates results efficiently in memory
-    4. Performs game-level splitting, normalization, validation, and saving
+    3. Saves batch files to intermediate directory
+    4. Optionally merges batches and performs splitting, normalization, validation, and saving
 
     Args:
         config: Configuration dictionary
         max_games: Optional limit on number of games
+        skip_merge: If True, stop after creating batches (don't merge)
+        cleanup: If True, delete batch files after successful merge
+
     """
     from .parallel_processor import discover_csv_files, process_files_parallel
+    from .merge_batches import merge_batches, process_merged_data
 
     print("\n" + "=" * 60)
     print("OPTIMIZED PARALLEL PREPROCESSING PIPELINE")
     print("=" * 60)
 
-    # Monitor memory if enabled
-    monitor_memory = config.get('preprocessing', {}).get('monitor_memory', False)
-    if monitor_memory:
-        log_memory_usage("Pipeline Start")
-
     # Discover CSV files
     print(f"\nDiscovering CSV files in {config['data']['data_root']}...")
-    csv_files = discover_csv_files(config['data']['data_root'], max_games=max_games)
+    csv_files = discover_csv_files(config["data"]["data_root"], max_games=max_games)
     print(f"Found {len(csv_files)} CSV files")
 
-    # Process files in parallel
-    num_workers = config.get('preprocessing', {}).get('num_workers', None)
+    # Process files in parallel (now returns batch file paths)
+    num_workers = config.get("preprocessing", {}).get("num_workers", None)
 
-    if monitor_memory:
-        with MemoryTracker("File Processing"):
-            df_compacted, strategic_features_list, labels_list, masks_list = process_files_parallel(
-                csv_files, config, num_workers=num_workers
-            )
-    else:
-        df_compacted, strategic_features_list, labels_list, masks_list = process_files_parallel(
-            csv_files, config, num_workers=num_workers
-        )
-
-    if len(df_compacted) == 0:
-        raise ValueError("No samples were successfully processed!")
-
-    print(f"\nTotal samples processed: {len(df_compacted):,}")
-
-    # Convert strategic features list to DataFrame
-    strategic_df = pd.DataFrame(strategic_features_list)
-
-    # Get expected feature names and fill missing columns with zeros
-    expected_feature_names = get_all_feature_names()
-    for feat_name in expected_feature_names:
-        if feat_name not in strategic_df.columns:
-            strategic_df[feat_name] = 0.0
-
-    # Reorder columns to match expected order
-    strategic_df = strategic_df[expected_feature_names]
-
-    # Add strategic features to dataframe
-    df_eng = pd.concat([df_compacted.reset_index(drop=True), strategic_df.reset_index(drop=True)], axis=1)
-
-    # Identify column groups (use df_compacted which has raw features + position features)
-    metadata_cols, label_cols, feature_cols = identify_column_groups(df_compacted)
-
-    # Engineer one-hot features (current_player, num_players, positions)
-    print("\nEngineering one-hot features...")
-    onehot_cols = []
-
-    # One-hot encode current_player
-    for i in range(4):
-        col_name = f"current_player_{i}"
-        df_eng[col_name] = (df_eng["current_player"] == i).astype(int)
-        onehot_cols.append(col_name)
-
-    # One-hot encode num_players
-    for n in [2, 3, 4]:
-        col_name = f"num_players_{n}"
-        df_eng[col_name] = (df_eng["num_players"] == n).astype(int)
-        onehot_cols.append(col_name)
-
-    # One-hot encode player positions
-    for player_idx in range(4):
-        position_col = f"player{player_idx}_position"
-        if position_col in df_eng.columns:
-            for pos in range(4):
-                col_name = f"{position_col}_{pos}"
-                df_eng[col_name] = (df_eng[position_col] == pos).astype(int)
-                onehot_cols.append(col_name)
-
-    # Update feature columns
-    player_position_cols = [f"player{i}_position" for i in range(4)]
-    new_feature_cols = [
-        col for col in feature_cols
-        if col not in ["current_player", "num_players"] and col not in player_position_cols
-    ]
-    new_feature_cols.extend(onehot_cols)
-
-    # Add turn_number as feature
-    if "turn_number" not in new_feature_cols:
-        new_feature_cols.append("turn_number")
-
-    # Add strategic features (these are already in df_eng from the concat above)
-    strategic_cols = list(strategic_df.columns)
-    new_feature_cols.extend(strategic_cols)
-
-    print(f"  Total features after engineering: {len(new_feature_cols)}")
-
-    # Verify all feature columns exist in df_eng
-    missing_cols = [col for col in new_feature_cols if col not in df_eng.columns]
-    if missing_cols:
-        print(f"  WARNING: Missing columns: {missing_cols[:10]}")
-        # Filter to only existing columns
-        new_feature_cols = [col for col in new_feature_cols if col in df_eng.columns]
-        print(f"  Adjusted to {len(new_feature_cols)} features")
-
-    # Convert labels list to dict of arrays
-    labels_all = {}
-    head_names = ['action_type', 'card_selection', 'card_reservation', 'gem_take3', 'gem_take2', 'noble', 'gems_removed']
-    for head in head_names:
-        labels_all[head] = np.array([labels[head] for labels in labels_list])
-
-    # Convert masks list to dict of arrays
-    masks_all = {}
-    for head in head_names:
-        masks_all[head] = np.stack([masks[head] for masks in masks_list], axis=0)
-
-    # Split by game_id
-    train_idx, val_idx, test_idx = split_by_game_id(
-        df_eng,
-        config["data"]["train_ratio"],
-        config["data"]["val_ratio"],
-        config["data"]["test_ratio"],
-        config["seed"],
+    batch_file_paths = process_files_parallel(
+        csv_files,
+        config,
+        num_workers=num_workers,
     )
 
-    # Extract features
-    print(f"\nExtracting features...")
-    print(f"  DataFrame shape: {df_eng.shape}")
-    print(f"  Feature columns count: {len(new_feature_cols)}")
-    print(f"  Checking if all feature columns exist in DataFrame...")
+    if not batch_file_paths:
+        raise ValueError("No batch files were created - file processing failed!")
 
-    # Instead of tracking feature columns manually, just use all columns that aren't metadata/labels
-    # This avoids issues with duplicates and missing columns
-    all_cols = set(df_eng.columns)
-    exclude_cols = set(metadata_cols + label_cols)
-    final_feature_cols = [col for col in df_eng.columns if col not in exclude_cols]
-
-    # Check for duplicate columns in DataFrame
-    if len(df_eng.columns) != len(set(df_eng.columns)):
-        duplicates = [col for col in df_eng.columns if list(df_eng.columns).count(col) > 1]
-        unique_duplicates = list(set(duplicates))
-        print(f"  WARNING: Found {len(unique_duplicates)} duplicate columns: {unique_duplicates[:5]}")
-        # Remove duplicates by keeping first occurrence
-        df_eng = df_eng.loc[:, ~df_eng.columns.duplicated()]
-        # Recalculate final_feature_cols
-        final_feature_cols = [col for col in df_eng.columns if col not in exclude_cols]
-
-    print(f"  Final feature columns count: {len(final_feature_cols)} (all non-metadata/label columns)")
-
-    X_all = df_eng[final_feature_cols].values
-    print(f"  X_all shape: {X_all.shape}")
-
-    # Create normalization mask AFTER we know the actual feature list
-    norm_mask = create_normalization_mask(final_feature_cols, onehot_cols, strategic_cols)
-    print(f"  Normalization mask shape: {norm_mask.shape}")
-
-    X_train = X_all[train_idx]
-    X_val = X_all[val_idx]
-    X_test = X_all[test_idx]
-
-    # Split labels
-    labels_train = {k: v[train_idx] for k, v in labels_all.items()}
-    labels_val = {k: v[val_idx] for k, v in labels_all.items()}
-    labels_test = {k: v[test_idx] for k, v in labels_all.items()}
-
-    # Split masks
-    masks_train = {k: v[train_idx] for k, v in masks_all.items()}
-    masks_val = {k: v[val_idx] for k, v in masks_all.items()}
-    masks_test = {k: v[test_idx] for k, v in masks_all.items()}
-
-    # Validate masks on training set
-    df_for_validation = df_eng.iloc[train_idx].reset_index(drop=True)
-    validation_report = validate_masks(masks_train, labels_train, df_for_validation)
-
-    # Save validation report
-    os.makedirs(config["data"]["processed_dir"], exist_ok=True)
-    with open(os.path.join(config["data"]["processed_dir"], "mask_validation_report.json"), "w") as f:
-        json.dump(validation_report, f, indent=2)
-    print(f"\n  Validation report saved")
-
-    # Normalize features
-    X_train_norm, X_val_norm, X_test_norm, scaler = normalize_features(
-        X_train, X_val, X_test, norm_mask
+    intermediate_dir = config.get("preprocessing", {}).get(
+        "intermediate_dir",
+        "data/intermediate",
     )
-
-    # Prepare label mappings using pre-computed constants
-    label_mappings = {
-        "action_type": {"build": 0, "reserve": 1, "take 2 tokens": 2, "take 3 tokens": 3},
-        "gem_take3_classes": {str(k): list(v) for k, v in CLASS_TO_COMBO_TAKE3.items()},
-        "gem_removal_classes": {str(k): list(v) for k, v in CLASS_TO_REMOVAL.items()},
-    }
-
-    # Save everything
-    save_preprocessed_data(
-        X_train_norm, X_val_norm, X_test_norm,
-        labels_train, labels_val, labels_test,
-        masks_train, masks_val, masks_test,
-        scaler, final_feature_cols, label_mappings,
-        config["data"]["processed_dir"],
-    )
-
-    print("\n✓ Optimized preprocessing complete!")
     print(f"\n{'=' * 60}")
-    print("Summary:")
-    print(f"  Total samples: {len(df_eng):,}")
-    print(f"  Input dimension: {X_train_norm.shape[1]}")
-    print(f"  Train/Val/Test: {len(X_train):,} / {len(X_val):,} / {len(X_test):,}")
+    print("Batching complete!")
+    print(f"  {len(batch_file_paths)} batch files saved to: {intermediate_dir}")
     print(f"{'=' * 60}\n")
+
+    # Optionally skip merge (for inspection or debugging)
+    if skip_merge:
+        print("Skipping merge step (--skip-merge flag set)")
+        print("To merge batches later, run:")
+        print(
+            "  python -m src.imitation_learning.merge_batches --config <config.yaml>",
+        )
+        return
+
+    # Call merge script to complete processing
+    print("Calling merge script to combine batches...")
+
+    # Merge batches
+    df_compacted, strategic_features_list, labels_list, masks_list = merge_batches(
+        batch_file_paths, config
+    )
+
+    # Process merged data
+    process_merged_data(
+        df_compacted,
+        strategic_features_list,
+        labels_list,
+        masks_list,
+        config,
+        skip_validation=False,
+    )
+
+    # Handle cleanup
+    if cleanup:
+        print("\nCleaning up batch files...")
+        try:
+            from .parallel_processor import delete_batch_files
+
+            delete_batch_files(batch_file_paths)
+            print(f"✓ Deleted {len(batch_file_paths)} batch files")
+        except Exception as e:
+            print(f"Warning: Failed to clean up batch files: {e}")
+    else:
+        print(f"\nBatch files kept in: {intermediate_dir}")
+        print("  To clean up manually, run with --cleanup flag")
 
 
 def main():
@@ -1277,16 +1226,38 @@ def main():
         description="Preprocess Splendor game data for imitation learning",
     )
     parser.add_argument(
-        "--config", type=str, default="config.yaml", help="Path to config file",
+        "--config",
+        type=str,
+        default="config.yaml",
+        help="Path to config file",
     )
     parser.add_argument(
-        "--max-games", type=int, default=None, help="Maximum number of games to load (for testing)",
+        "--max-games",
+        type=int,
+        default=None,
+        help="Maximum number of games to load (for testing)",
     )
     parser.add_argument(
-        "--single-file", type=str, default=None, help="Process only a single CSV file (for debugging)",
+        "--single-file",
+        type=str,
+        default=None,
+        help="Process only a single CSV file (for debugging)",
     )
     parser.add_argument(
-        "--parallel", type=str, default="true", help="Use parallel processing (true/false, default: true)",
+        "--parallel",
+        type=str,
+        default="true",
+        help="Use parallel processing (true/false, default: true)",
+    )
+    parser.add_argument(
+        "--skip-merge",
+        action="store_true",
+        help="Stop after creating batches, don't merge (default: False)",
+    )
+    parser.add_argument(
+        "--cleanup",
+        action="store_true",
+        help="Delete batch files after successful merge (default: False)",
     )
     args = parser.parse_args()
 
@@ -1304,7 +1275,12 @@ def main():
     # Route to appropriate preprocessing pipeline
     if use_parallel and not args.single_file:
         # Use new optimized parallel processing pipeline
-        preprocess_with_parallel_processing(config, max_games=args.max_games)
+        preprocess_with_parallel_processing(
+            config,
+            max_games=args.max_games,
+            skip_merge=args.skip_merge,
+            cleanup=args.cleanup,
+        )
         return
 
     # Old pipeline (for single-file debugging or when parallel=false)
@@ -1315,7 +1291,7 @@ def main():
 
     # Load game data (with NaN values preserved!)
     if args.single_file:
-        print(f"\n⚠️  DEBUG MODE: Processing single file")
+        print("\n⚠️  DEBUG MODE: Processing single file")
         df = load_single_game(args.single_file)
     elif args.max_games:
         print(f"\n⚠️  TEST MODE: Loading only {args.max_games} games")
@@ -1338,7 +1314,10 @@ def main():
     metadata_cols, label_cols, feature_cols = identify_column_groups(df_compacted)
 
     # Engineer features (one-hot encoding + strategic features)
-    df_eng, feature_cols_eng, onehot_cols, strategic_cols = engineer_features(df_compacted, feature_cols)
+    df_eng, feature_cols_eng, onehot_cols, strategic_cols = engineer_features(
+        df_compacted,
+        feature_cols,
+    )
 
     # Create normalization mask
     norm_mask = create_normalization_mask(feature_cols_eng, onehot_cols, strategic_cols)
@@ -1383,9 +1362,14 @@ def main():
     )
 
     # Save validation report
-    with open(os.path.join(config["data"]["processed_dir"], "mask_validation_report.json"), "w") as f:
+    with open(
+        os.path.join(config["data"]["processed_dir"], "mask_validation_report.json"),
+        "w",
+    ) as f:
         json.dump(validation_report, f, indent=2)
-    print(f"\n  Validation report saved to: {config['data']['processed_dir']}/mask_validation_report.json")
+    print(
+        f"\n  Validation report saved to: {config['data']['processed_dir']}/mask_validation_report.json",
+    )
 
     # Normalize features
     X_train_norm, X_val_norm, X_test_norm, scaler = normalize_features(
