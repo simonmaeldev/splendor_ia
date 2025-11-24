@@ -1,5 +1,5 @@
-# Small Architecture Configuration
-# Use for quick testing and debugging
+# Medium Architecture Configuration (Default)
+# Recommended starting point for training
 
 seed: 42
 
@@ -22,8 +22,8 @@ preprocessing:
 
 model:
   input_dim: null
-  trunk_dims: [256, 128]  # Smaller trunk
-  head_dims: [64]         # Single hidden layer per head
+  trunk_dims: [768, 512, 256]
+  head_dims: [256, 128, 64]
   dropout: 0.3
   num_classes:
     action_type: 4
@@ -37,8 +37,8 @@ model:
 training:
   batch_size: 256
   learning_rate: 0.001
-  epochs: 50
-  patience: 10
+  epochs: 150
+  patience: 20
   gradient_clip_norm: null
   scheduler:
     enabled: true

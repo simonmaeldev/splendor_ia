@@ -10,6 +10,16 @@ data:
   val_ratio: 0.1
   test_ratio: 0.1
 
+preprocessing:
+  num_workers: null  # null = auto-detect (cpu_count - 2), or specify number
+  parallel: true     # Use parallel/optimized processing
+  verbose: true      # Detailed logging
+  batch_size: 500    # Process and save files in batches (reduces memory)
+  use_float32: true  # Use float32 instead of float64 (50% memory savings)
+  monitor_memory: true  # Enable memory monitoring during processing
+  intermediate_dir: "data/intermediate"  # Directory for batch files
+  merge_strategy: "sequential"  # "sequential" (memory-efficient) or "accumulative" (legacy)
+
 model:
   input_dim: null
   trunk_dims: [512, 512, 256]  # Deeper trunk with 3 layers
@@ -29,7 +39,6 @@ training:
   learning_rate: 0.001
   epochs: 50
   patience: 10
-  use_class_weights: false
   gradient_clip_norm: 1.0  # Gradient clipping for deeper network
   scheduler:
     enabled: true
@@ -39,7 +48,7 @@ training:
 
 compute:
   device: "cuda"
-  num_workers: 4
+  num_workers: 12
 
 logging:
   wandb_project: "splendor-ia"
