@@ -40,12 +40,17 @@ from .utils import (
     encode_gem_take3,
     encode_gems_removed,
     generate_all_masks_from_row,
-    generate_gem_removal_classes,
-    generate_gem_take3_classes,
     get_num_gem_removal_classes,
     set_seed,
 )
+from .constants import (
+    CLASS_TO_COMBO_TAKE3,
+    COMBO_TO_CLASS_TAKE3,
+    CLASS_TO_REMOVAL,
+    REMOVAL_TO_CLASS,
+)
 from .feature_engineering import extract_all_features, get_all_feature_names
+from .memory_monitor import log_memory_usage, MemoryTracker
 
 
 def load_config(config_path: str) -> Dict:
@@ -527,9 +532,9 @@ def encode_labels(df: pd.DataFrame, label_cols: List[str]) -> Dict[str, np.ndarr
 
     labels = {}
 
-    # Generate encoding mappings
-    _, combo_to_class_take3 = generate_gem_take3_classes()
-    _, removal_to_class = generate_gem_removal_classes()
+    # Use pre-computed constant mappings
+    combo_to_class_take3 = COMBO_TO_CLASS_TAKE3
+    removal_to_class = REMOVAL_TO_CLASS
 
     # Action type: string to int mapping
     print("  Encoding action_type...")
@@ -1043,6 +1048,229 @@ def validate_masks(
     return validation_report
 
 
+def preprocess_with_parallel_processing(config: Dict, max_games: int = None) -> None:
+    """New optimized preprocessing pipeline using parallel processing.
+
+    This pipeline:
+    1. Discovers CSV files from data_root
+    2. Processes files individually with optimized row processing:
+       - Reconstructs board once per row
+       - Reuses board for both masks and features (50% reduction in reconstructions)
+    3. Accumulates results efficiently in memory
+    4. Performs game-level splitting, normalization, validation, and saving
+
+    Args:
+        config: Configuration dictionary
+        max_games: Optional limit on number of games
+    """
+    from .parallel_processor import discover_csv_files, process_files_parallel
+
+    print("\n" + "=" * 60)
+    print("OPTIMIZED PARALLEL PREPROCESSING PIPELINE")
+    print("=" * 60)
+
+    # Monitor memory if enabled
+    monitor_memory = config.get('preprocessing', {}).get('monitor_memory', False)
+    if monitor_memory:
+        log_memory_usage("Pipeline Start")
+
+    # Discover CSV files
+    print(f"\nDiscovering CSV files in {config['data']['data_root']}...")
+    csv_files = discover_csv_files(config['data']['data_root'], max_games=max_games)
+    print(f"Found {len(csv_files)} CSV files")
+
+    # Process files in parallel
+    num_workers = config.get('preprocessing', {}).get('num_workers', None)
+
+    if monitor_memory:
+        with MemoryTracker("File Processing"):
+            df_compacted, strategic_features_list, labels_list, masks_list = process_files_parallel(
+                csv_files, config, num_workers=num_workers
+            )
+    else:
+        df_compacted, strategic_features_list, labels_list, masks_list = process_files_parallel(
+            csv_files, config, num_workers=num_workers
+        )
+
+    if len(df_compacted) == 0:
+        raise ValueError("No samples were successfully processed!")
+
+    print(f"\nTotal samples processed: {len(df_compacted):,}")
+
+    # Convert strategic features list to DataFrame
+    strategic_df = pd.DataFrame(strategic_features_list)
+
+    # Get expected feature names and fill missing columns with zeros
+    expected_feature_names = get_all_feature_names()
+    for feat_name in expected_feature_names:
+        if feat_name not in strategic_df.columns:
+            strategic_df[feat_name] = 0.0
+
+    # Reorder columns to match expected order
+    strategic_df = strategic_df[expected_feature_names]
+
+    # Add strategic features to dataframe
+    df_eng = pd.concat([df_compacted.reset_index(drop=True), strategic_df.reset_index(drop=True)], axis=1)
+
+    # Identify column groups (use df_compacted which has raw features + position features)
+    metadata_cols, label_cols, feature_cols = identify_column_groups(df_compacted)
+
+    # Engineer one-hot features (current_player, num_players, positions)
+    print("\nEngineering one-hot features...")
+    onehot_cols = []
+
+    # One-hot encode current_player
+    for i in range(4):
+        col_name = f"current_player_{i}"
+        df_eng[col_name] = (df_eng["current_player"] == i).astype(int)
+        onehot_cols.append(col_name)
+
+    # One-hot encode num_players
+    for n in [2, 3, 4]:
+        col_name = f"num_players_{n}"
+        df_eng[col_name] = (df_eng["num_players"] == n).astype(int)
+        onehot_cols.append(col_name)
+
+    # One-hot encode player positions
+    for player_idx in range(4):
+        position_col = f"player{player_idx}_position"
+        if position_col in df_eng.columns:
+            for pos in range(4):
+                col_name = f"{position_col}_{pos}"
+                df_eng[col_name] = (df_eng[position_col] == pos).astype(int)
+                onehot_cols.append(col_name)
+
+    # Update feature columns
+    player_position_cols = [f"player{i}_position" for i in range(4)]
+    new_feature_cols = [
+        col for col in feature_cols
+        if col not in ["current_player", "num_players"] and col not in player_position_cols
+    ]
+    new_feature_cols.extend(onehot_cols)
+
+    # Add turn_number as feature
+    if "turn_number" not in new_feature_cols:
+        new_feature_cols.append("turn_number")
+
+    # Add strategic features (these are already in df_eng from the concat above)
+    strategic_cols = list(strategic_df.columns)
+    new_feature_cols.extend(strategic_cols)
+
+    print(f"  Total features after engineering: {len(new_feature_cols)}")
+
+    # Verify all feature columns exist in df_eng
+    missing_cols = [col for col in new_feature_cols if col not in df_eng.columns]
+    if missing_cols:
+        print(f"  WARNING: Missing columns: {missing_cols[:10]}")
+        # Filter to only existing columns
+        new_feature_cols = [col for col in new_feature_cols if col in df_eng.columns]
+        print(f"  Adjusted to {len(new_feature_cols)} features")
+
+    # Convert labels list to dict of arrays
+    labels_all = {}
+    head_names = ['action_type', 'card_selection', 'card_reservation', 'gem_take3', 'gem_take2', 'noble', 'gems_removed']
+    for head in head_names:
+        labels_all[head] = np.array([labels[head] for labels in labels_list])
+
+    # Convert masks list to dict of arrays
+    masks_all = {}
+    for head in head_names:
+        masks_all[head] = np.stack([masks[head] for masks in masks_list], axis=0)
+
+    # Split by game_id
+    train_idx, val_idx, test_idx = split_by_game_id(
+        df_eng,
+        config["data"]["train_ratio"],
+        config["data"]["val_ratio"],
+        config["data"]["test_ratio"],
+        config["seed"],
+    )
+
+    # Extract features
+    print(f"\nExtracting features...")
+    print(f"  DataFrame shape: {df_eng.shape}")
+    print(f"  Feature columns count: {len(new_feature_cols)}")
+    print(f"  Checking if all feature columns exist in DataFrame...")
+
+    # Instead of tracking feature columns manually, just use all columns that aren't metadata/labels
+    # This avoids issues with duplicates and missing columns
+    all_cols = set(df_eng.columns)
+    exclude_cols = set(metadata_cols + label_cols)
+    final_feature_cols = [col for col in df_eng.columns if col not in exclude_cols]
+
+    # Check for duplicate columns in DataFrame
+    if len(df_eng.columns) != len(set(df_eng.columns)):
+        duplicates = [col for col in df_eng.columns if list(df_eng.columns).count(col) > 1]
+        unique_duplicates = list(set(duplicates))
+        print(f"  WARNING: Found {len(unique_duplicates)} duplicate columns: {unique_duplicates[:5]}")
+        # Remove duplicates by keeping first occurrence
+        df_eng = df_eng.loc[:, ~df_eng.columns.duplicated()]
+        # Recalculate final_feature_cols
+        final_feature_cols = [col for col in df_eng.columns if col not in exclude_cols]
+
+    print(f"  Final feature columns count: {len(final_feature_cols)} (all non-metadata/label columns)")
+
+    X_all = df_eng[final_feature_cols].values
+    print(f"  X_all shape: {X_all.shape}")
+
+    # Create normalization mask AFTER we know the actual feature list
+    norm_mask = create_normalization_mask(final_feature_cols, onehot_cols, strategic_cols)
+    print(f"  Normalization mask shape: {norm_mask.shape}")
+
+    X_train = X_all[train_idx]
+    X_val = X_all[val_idx]
+    X_test = X_all[test_idx]
+
+    # Split labels
+    labels_train = {k: v[train_idx] for k, v in labels_all.items()}
+    labels_val = {k: v[val_idx] for k, v in labels_all.items()}
+    labels_test = {k: v[test_idx] for k, v in labels_all.items()}
+
+    # Split masks
+    masks_train = {k: v[train_idx] for k, v in masks_all.items()}
+    masks_val = {k: v[val_idx] for k, v in masks_all.items()}
+    masks_test = {k: v[test_idx] for k, v in masks_all.items()}
+
+    # Validate masks on training set
+    df_for_validation = df_eng.iloc[train_idx].reset_index(drop=True)
+    validation_report = validate_masks(masks_train, labels_train, df_for_validation)
+
+    # Save validation report
+    os.makedirs(config["data"]["processed_dir"], exist_ok=True)
+    with open(os.path.join(config["data"]["processed_dir"], "mask_validation_report.json"), "w") as f:
+        json.dump(validation_report, f, indent=2)
+    print(f"\n  Validation report saved")
+
+    # Normalize features
+    X_train_norm, X_val_norm, X_test_norm, scaler = normalize_features(
+        X_train, X_val, X_test, norm_mask
+    )
+
+    # Prepare label mappings using pre-computed constants
+    label_mappings = {
+        "action_type": {"build": 0, "reserve": 1, "take 2 tokens": 2, "take 3 tokens": 3},
+        "gem_take3_classes": {str(k): list(v) for k, v in CLASS_TO_COMBO_TAKE3.items()},
+        "gem_removal_classes": {str(k): list(v) for k, v in CLASS_TO_REMOVAL.items()},
+    }
+
+    # Save everything
+    save_preprocessed_data(
+        X_train_norm, X_val_norm, X_test_norm,
+        labels_train, labels_val, labels_test,
+        masks_train, masks_val, masks_test,
+        scaler, final_feature_cols, label_mappings,
+        config["data"]["processed_dir"],
+    )
+
+    print("\n✓ Optimized preprocessing complete!")
+    print(f"\n{'=' * 60}")
+    print("Summary:")
+    print(f"  Total samples: {len(df_eng):,}")
+    print(f"  Input dimension: {X_train_norm.shape[1]}")
+    print(f"  Train/Val/Test: {len(X_train):,} / {len(X_val):,} / {len(X_test):,}")
+    print(f"{'=' * 60}\n")
+
+
 def main():
     """Main preprocessing pipeline."""
     parser = argparse.ArgumentParser(
@@ -1057,6 +1285,9 @@ def main():
     parser.add_argument(
         "--single-file", type=str, default=None, help="Process only a single CSV file (for debugging)",
     )
+    parser.add_argument(
+        "--parallel", type=str, default="true", help="Use parallel processing (true/false, default: true)",
+    )
     args = parser.parse_args()
 
     # Load configuration
@@ -1066,6 +1297,21 @@ def main():
     # Set seed for reproducibility
     set_seed(config["seed"])
     print(f"Set random seed: {config['seed']}")
+
+    # Parse parallel flag
+    use_parallel = args.parallel.lower() in ["true", "1", "yes", "y"]
+
+    # Route to appropriate preprocessing pipeline
+    if use_parallel and not args.single_file:
+        # Use new optimized parallel processing pipeline
+        preprocess_with_parallel_processing(config, max_games=args.max_games)
+        return
+
+    # Old pipeline (for single-file debugging or when parallel=false)
+    print("\n" + "=" * 60)
+    print("ORIGINAL PREPROCESSING PIPELINE")
+    print("(Use --parallel true for optimized processing)")
+    print("=" * 60)
 
     # Load game data (with NaN values preserved!)
     if args.single_file:

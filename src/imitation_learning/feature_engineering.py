@@ -51,11 +51,13 @@ from utils.state_reconstruction import reconstruct_board_from_csv_row
 FeatureDict = Dict[str, float]
 
 
-def extract_all_features(row: pd.Series) -> FeatureDict:
+def extract_all_features(row: pd.Series, board: 'Board' = None) -> FeatureDict:
     """Main entry point: extract all strategic features from a game state.
 
     Args:
         row: Pandas Series containing raw game state from CSV
+        board: Optional pre-reconstructed Board object (optimization to avoid redundant reconstruction)
+               If None, will reconstruct from row (backward compatible)
 
     Returns:
         Dictionary mapping feature names to float values
@@ -63,12 +65,18 @@ def extract_all_features(row: pd.Series) -> FeatureDict:
     Example:
         >>> features = extract_all_features(df.iloc[0])
         >>> len(features)  # ~893 features
+
+    Note:
+        OPTIMIZATION: When processing many rows, reconstruct the board once and
+        pass it to both mask generation and feature engineering to avoid
+        redundant board reconstructions (2x speedup).
     """
     features: FeatureDict = {}
 
     try:
-        # Reconstruct board state from CSV
-        board = reconstruct_board_from_csv_row(row.to_dict())
+        # Reconstruct board state from CSV if not provided
+        if board is None:
+            board = reconstruct_board_from_csv_row(row.to_dict())
 
         # Extract all feature categories
         features.update(extract_token_features(row, board))

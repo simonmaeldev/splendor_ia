@@ -556,8 +556,8 @@ def get_num_gem_removal_classes() -> int:
         84  # Or whatever the actual count is
 
     """
-    _, removal_to_class = generate_gem_removal_classes()
-    return len(removal_to_class)
+    from .constants import NUM_GEM_REMOVAL_CLASSES
+    return NUM_GEM_REMOVAL_CLASSES
 
 
 # ============================================================================
@@ -752,16 +752,18 @@ def get_mask_from_move_gems_removed(
         mask[class_idx] = 1
 
 
-def generate_all_masks_from_row(row: Dict) -> Dict[str, np.ndarray]:
+def generate_all_masks_from_row(row: Dict, board: Optional[Board] = None) -> Dict[str, np.ndarray]:
     """Generate all 7 legal action masks from a CSV row.
 
     This is the main entry point for mask generation. It:
-    1. Reconstructs the board state from CSV features
+    1. Reconstructs the board state from CSV features (or uses provided board)
     2. Calls board.getMoves() to get legal moves
     3. Converts moves to masks for each prediction head
 
     Args:
         row: CSV row as dictionary (from pandas DataFrame.to_dict('records'))
+        board: Optional pre-reconstructed Board object (optimization to avoid redundant reconstruction)
+               If None, will reconstruct from row (backward compatible)
 
     Returns:
         Dict with keys: {action_type, card_selection, card_reservation,
@@ -779,19 +781,25 @@ def generate_all_masks_from_row(row: Dict) -> Dict[str, np.ndarray]:
         and logs the error. This ensures preprocessing continues even if
         a few samples have issues.
 
+        OPTIMIZATION: When processing many rows, reconstruct the board once and
+        pass it to both mask generation and feature engineering to avoid
+        redundant board reconstructions (2x speedup).
+
     """
     try:
         # Import here to avoid circular dependency
 
-        # Reconstruct board state
-        board = reconstruct_board_from_csv_row(row)
+        # Reconstruct board state if not provided
+        if board is None:
+            board = reconstruct_board_from_csv_row(row)
 
         # Get legal moves
         moves = board.getMoves()
 
-        # Generate encoding lookups
-        _, combo_to_class_take3 = generate_gem_take3_classes()
-        _, removal_to_class = generate_gem_removal_classes()
+        # Use pre-computed constants instead of generating
+        from .constants import COMBO_TO_CLASS_TAKE3, REMOVAL_TO_CLASS
+        combo_to_class_take3 = COMBO_TO_CLASS_TAKE3
+        removal_to_class = REMOVAL_TO_CLASS
 
         # Initialize masks
         masks = {
