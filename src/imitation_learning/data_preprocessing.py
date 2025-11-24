@@ -1146,7 +1146,7 @@ def preprocess_with_parallel_processing(
 
     """
     from .parallel_processor import discover_csv_files, process_files_parallel
-    from .merge_batches import merge_batches, process_merged_data
+    from .merge_batches import merge_batches, merge_batches_sequential, process_merged_data
 
     print("\n" + "=" * 60)
     print("OPTIMIZED PARALLEL PREPROCESSING PIPELINE")
@@ -1190,17 +1190,28 @@ def preprocess_with_parallel_processing(
     # Call merge script to complete processing
     print("Calling merge script to combine batches...")
 
-    # Merge batches
-    df_compacted, strategic_features_list, labels_list, masks_list = merge_batches(
-        batch_file_paths, config
-    )
+    # Determine merge strategy
+    merge_strategy = config.get('preprocessing', {}).get('merge_strategy', 'sequential')
+    monitor_memory = config.get('preprocessing', {}).get('monitor_memory', False)
+
+    # Merge batches using appropriate strategy
+    if merge_strategy == 'sequential':
+        print("Using sequential two-pass merge (memory-efficient)...")
+        df_compacted, strategic_features_array, labels_arrays, masks_arrays = merge_batches_sequential(
+            batch_file_paths, config, monitor_memory=monitor_memory
+        )
+    else:
+        print("Using accumulative merge (legacy)...")
+        df_compacted, strategic_features_array, labels_arrays, masks_arrays = merge_batches(
+            batch_file_paths, config, monitor_memory=monitor_memory
+        )
 
     # Process merged data
     process_merged_data(
         df_compacted,
-        strategic_features_list,
-        labels_list,
-        masks_list,
+        strategic_features_array,
+        labels_arrays,
+        masks_arrays,
         config,
         skip_validation=False,
     )

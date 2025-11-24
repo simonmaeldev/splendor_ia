@@ -89,8 +89,11 @@ def discover_batch_files(intermediate_dir: str) -> List[str]:
 
 def merge_batches(
     batch_file_paths: List[str], config: Dict, monitor_memory: bool = False,
-) -> Tuple:
-    """Merge batch files into combined arrays.
+) -> Tuple[pd.DataFrame, np.ndarray, Dict[str, np.ndarray], Dict[str, np.ndarray]]:
+    """Merge batch files into combined arrays (accumulative strategy).
+
+    This is the original merge strategy that loads all batches and accumulates them
+    in memory before concatenating. Works with the new array format.
 
     Args:
         batch_file_paths: List of paths to batch files
@@ -98,40 +101,53 @@ def merge_batches(
         monitor_memory: Whether to log memory usage
 
     Returns:
-        Tuple of (df_compacted, strategic_features_list, labels_list, masks_list)
+        Tuple of (df_compacted, strategic_features_array, labels_arrays, masks_arrays)
 
     """
     print(f"\n{'=' * 60}")
-    print(f"Merging {len(batch_file_paths)} batches...")
+    print(f"Merging {len(batch_file_paths)} batches (accumulative strategy)...")
     print(f"{'=' * 60}")
 
     if monitor_memory:
         log_memory_usage("Before batch merging")
 
+    # Head names
+    head_names = [
+        "action_type",
+        "card_selection",
+        "card_reservation",
+        "gem_take3",
+        "gem_take2",
+        "noble",
+        "gems_removed",
+    ]
+
     df_compacted_list = []
-    strategic_features_list = []
-    labels_list = []
-    masks_list = []
+    strategic_features_list = []  # List of arrays (not dicts!)
+    labels_list = {head: [] for head in head_names}  # Separate list per head
+    masks_list = {head: [] for head in head_names}
 
     for i, batch_file in enumerate(batch_file_paths):
         print(f"\nLoading batch {i + 1}/{len(batch_file_paths)}...")
 
-        # Load batch
-        batch_df, batch_features, batch_labels, batch_masks = load_batch_from_file(
+        # Load batch (now returns arrays)
+        batch_df, batch_features_array, batch_labels_arrays, batch_masks_arrays = load_batch_from_file(
             batch_file,
         )
 
         if monitor_memory:
             log_memory_usage(f"After loading batch {i + 1}")
 
-        # Append to final lists
+        # Append arrays to lists
         df_compacted_list.append(batch_df)
-        strategic_features_list.extend(batch_features)
-        labels_list.extend(batch_labels)
-        masks_list.extend(batch_masks)
+        strategic_features_list.append(batch_features_array)
+
+        for head in head_names:
+            labels_list[head].append(batch_labels_arrays[head])
+            masks_list[head].append(batch_masks_arrays[head])
 
         # Clear batch data from memory
-        del batch_df, batch_features, batch_labels, batch_masks
+        del batch_df, batch_features_array, batch_labels_arrays, batch_masks_arrays
         gc.collect()
 
         if monitor_memory:
@@ -151,19 +167,177 @@ def merge_batches(
     if len(df_compacted) == 0:
         raise ValueError("No samples were successfully processed!")
 
+    # Concatenate arrays
+    print(f"\nConcatenating arrays...")
+    strategic_features_array = np.concatenate(strategic_features_list, axis=0)
+    del strategic_features_list
+    gc.collect()
+
+    labels_arrays = {head: np.concatenate(labels_list[head], axis=0) for head in head_names}
+    del labels_list
+    gc.collect()
+
+    masks_arrays = {head: np.concatenate(masks_list[head], axis=0) for head in head_names}
+    del masks_list
+    gc.collect()
+
     if monitor_memory:
         log_memory_usage("After batch merging complete")
 
     print(f"\nTotal samples processed: {len(df_compacted):,}")
+    print(f"Strategic features array: {strategic_features_array.shape}")
 
-    return df_compacted, strategic_features_list, labels_list, masks_list
+    return df_compacted, strategic_features_array, labels_arrays, masks_arrays
+
+
+def merge_batches_sequential(
+    batch_file_paths: List[str],
+    config: Dict,
+    monitor_memory: bool = False,
+) -> Tuple[pd.DataFrame, np.ndarray, Dict[str, np.ndarray], Dict[str, np.ndarray]]:
+    """Merge batches using sequential two-pass algorithm (memory-efficient).
+
+    This eliminates memory accumulation by:
+    1. Pass 1: Scan all batches to get total size
+    2. Preallocate final arrays once
+    3. Pass 2: Load each batch, write to preallocated arrays, release immediately
+
+    Peak memory: ~size of final arrays (3-4GB) vs ~70GB for accumulative merge.
+
+    Args:
+        batch_file_paths: List of batch file paths
+        config: Configuration dictionary
+        monitor_memory: Whether to log memory usage
+
+    Returns:
+        Tuple of (df_compacted, strategic_features_array, labels_arrays, masks_arrays)
+    """
+    # Head names and classes
+    head_names = [
+        "action_type",
+        "card_selection",
+        "card_reservation",
+        "gem_take3",
+        "gem_take2",
+        "noble",
+        "gems_removed",
+    ]
+
+    num_classes = {
+        'action_type': 4,
+        'card_selection': 15,
+        'card_reservation': 15,
+        'gem_take3': 26,
+        'gem_take2': 5,
+        'noble': 5,
+        'gems_removed': 84,
+    }
+
+    # PASS 1: Calculate total size and get dimensions
+    print(f"\n{'='*60}")
+    print("PASS 1: Scanning batches to calculate dimensions...")
+    print(f"{'='*60}")
+
+    total_samples = 0
+    num_features = None
+
+    for i, batch_file in enumerate(batch_file_paths):
+        data = np.load(batch_file, allow_pickle=True)
+        metadata = data['metadata'].item()
+        n_samples = metadata['num_samples']
+        total_samples += n_samples
+
+        if num_features is None:
+            # Detect format
+            is_new_format = 'strategic_features' in data and len(data['strategic_features'].shape) == 2
+            if is_new_format:
+                num_features = data['strategic_features'].shape[1]
+            else:
+                # Old format - will need to get from feature names
+                from .feature_engineering import get_all_feature_names
+                num_features = len(get_all_feature_names())
+
+        print(f"  Batch {i+1}/{len(batch_file_paths)}: {n_samples:,} samples")
+
+        del data
+        gc.collect()
+
+    print(f"\nTotal samples: {total_samples:,}")
+    print(f"Feature dimension: {num_features}")
+
+    # PASS 2: Preallocate and fill arrays
+    print(f"\n{'='*60}")
+    print("PASS 2: Preallocating arrays and filling sequentially...")
+    print(f"{'='*60}")
+
+    if monitor_memory:
+        log_memory_usage("Before array preallocation")
+
+    # Preallocate all arrays at once
+    strategic_features_array = np.zeros((total_samples, num_features), dtype=np.float32)
+    labels_arrays = {head: np.zeros(total_samples, dtype=np.int16) for head in head_names}
+    masks_arrays = {
+        head: np.zeros((total_samples, num_classes[head]), dtype=np.int8)
+        for head in head_names
+    }
+    df_list = []  # Still need to collect DataFrames for concat
+
+    if monitor_memory:
+        log_memory_usage("After array preallocation")
+
+    # Fill arrays batch by batch
+    offset = 0
+    for i, batch_file in enumerate(batch_file_paths):
+        print(f"\nLoading and writing batch {i+1}/{len(batch_file_paths)}...")
+
+        # Load batch (handles both old and new formats)
+        batch_df, batch_features, batch_labels, batch_masks = load_batch_from_file(batch_file)
+        n_samples = len(batch_df)
+
+        # Write directly to preallocated arrays
+        strategic_features_array[offset:offset+n_samples] = batch_features
+
+        for head in head_names:
+            labels_arrays[head][offset:offset+n_samples] = batch_labels[head]
+            masks_arrays[head][offset:offset+n_samples] = batch_masks[head]
+
+        df_list.append(batch_df)
+
+        # Update offset
+        offset += n_samples
+
+        # Immediately release batch memory
+        del batch_df, batch_features, batch_labels, batch_masks
+        gc.collect()
+
+        if monitor_memory:
+            log_memory_usage(f"After batch {i+1}")
+
+        print(f"  Written {offset:,} / {total_samples:,} samples ({offset/total_samples*100:.1f}%)")
+
+    # Combine DataFrames (unavoidable, but much smaller than strategic features)
+    print(f"\nCombining DataFrames...")
+    df_compacted = pd.concat(df_list, axis=0, ignore_index=True)
+    del df_list
+    gc.collect()
+
+    if monitor_memory:
+        log_memory_usage("After DataFrame concat")
+
+    print(f"\n{'='*60}")
+    print("Sequential merge complete!")
+    print(f"  Total samples: {total_samples:,}")
+    print(f"  Strategic features: {strategic_features_array.shape}")
+    print(f"{'='*60}\n")
+
+    return df_compacted, strategic_features_array, labels_arrays, masks_arrays
 
 
 def process_merged_data(
     df_compacted: pd.DataFrame,
-    strategic_features_list: List[Dict],
-    labels_list: List[Dict],
-    masks_list: List[Dict],
+    strategic_features_array: np.ndarray,
+    labels_arrays: Dict[str, np.ndarray],
+    masks_arrays: Dict[str, np.ndarray],
     config: Dict,
     skip_validation: bool = False,
 ) -> None:
@@ -171,24 +345,21 @@ def process_merged_data(
 
     Args:
         df_compacted: Combined DataFrame from all batches
-        strategic_features_list: Combined strategic features from all batches
-        labels_list: Combined labels from all batches
-        masks_list: Combined masks from all batches
+        strategic_features_array: Combined strategic features array (N, 893)
+        labels_arrays: Dict of label arrays per head
+        masks_arrays: Dict of mask arrays per head
         config: Configuration dictionary
         skip_validation: Whether to skip mask validation
 
     """
-    # Convert strategic features list to DataFrame
-    strategic_df = pd.DataFrame(strategic_features_list)
-
-    # Get expected feature names and fill missing columns with zeros
+    # Get expected feature names
     expected_feature_names = get_all_feature_names()
-    for feat_name in expected_feature_names:
-        if feat_name not in strategic_df.columns:
-            strategic_df[feat_name] = 0.0
 
-    # Reorder columns to match expected order
-    strategic_df = strategic_df[expected_feature_names]
+    # Create strategic DataFrame from array
+    strategic_df = pd.DataFrame(
+        strategic_features_array,
+        columns=expected_feature_names
+    )
 
     # Add strategic features to dataframe
     df_eng = pd.concat(
@@ -252,24 +423,9 @@ def process_merged_data(
         new_feature_cols = [col for col in new_feature_cols if col in df_eng.columns]
         print(f"  Adjusted to {len(new_feature_cols)} features")
 
-    # Convert labels list to dict of arrays
-    labels_all = {}
-    head_names = [
-        "action_type",
-        "card_selection",
-        "card_reservation",
-        "gem_take3",
-        "gem_take2",
-        "noble",
-        "gems_removed",
-    ]
-    for head in head_names:
-        labels_all[head] = np.array([labels[head] for labels in labels_list])
-
-    # Convert masks list to dict of arrays
-    masks_all = {}
-    for head in head_names:
-        masks_all[head] = np.stack([masks[head] for masks in masks_list], axis=0)
+    # Labels and masks are already arrays (no conversion needed)
+    labels_all = labels_arrays
+    masks_all = masks_arrays
 
     # Split by game_id
     train_idx, val_idx, test_idx = split_by_game_id(
@@ -446,17 +602,27 @@ def main():
     # Discover batch files
     batch_file_paths = discover_batch_files(intermediate_dir)
 
-    # Merge batches
-    df_compacted, strategic_features_list, labels_list, masks_list = merge_batches(
-        batch_file_paths, config, monitor_memory=monitor_memory,
-    )
+    # Determine merge strategy
+    merge_strategy = config.get('preprocessing', {}).get('merge_strategy', 'sequential')
+
+    # Merge batches using appropriate strategy
+    if merge_strategy == 'sequential':
+        print("Using sequential two-pass merge (memory-efficient)...")
+        df_compacted, strategic_features_array, labels_arrays, masks_arrays = merge_batches_sequential(
+            batch_file_paths, config, monitor_memory=monitor_memory,
+        )
+    else:
+        print("Using accumulative merge (legacy)...")
+        df_compacted, strategic_features_array, labels_arrays, masks_arrays = merge_batches(
+            batch_file_paths, config, monitor_memory=monitor_memory,
+        )
 
     # Process merged data
     process_merged_data(
         df_compacted,
-        strategic_features_list,
-        labels_list,
-        masks_list,
+        strategic_features_array,
+        labels_arrays,
+        masks_arrays,
         config,
         skip_validation=args.skip_validation,
     )

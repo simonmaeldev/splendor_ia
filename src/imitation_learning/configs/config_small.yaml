@@ -18,6 +18,7 @@ preprocessing:
   use_float32: true  # Use float32 instead of float64 (50% memory savings)
   monitor_memory: true  # Enable memory monitoring during processing
   intermediate_dir: "data/intermediate"  # Directory for batch files
+  merge_strategy: "sequential"  # "sequential" (memory-efficient) or "accumulative" (legacy)
 
 model:
   input_dim: null

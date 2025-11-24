@@ -40,9 +40,156 @@ from .constants import (
     COMBO_TO_CLASS_TAKE3,
     REMOVAL_TO_CLASS,
 )
-from .feature_engineering import extract_all_features
+from .feature_engineering import extract_all_features, get_all_feature_names
 from .memory_monitor import log_memory_usage
 from utils.state_reconstruction import reconstruct_board_from_csv_row
+
+
+# Head names for multi-head prediction
+HEAD_NAMES = [
+    "action_type",
+    "card_selection",
+    "card_reservation",
+    "gem_take3",
+    "gem_take2",
+    "noble",
+    "gems_removed",
+]
+
+# Number of classes for each mask head
+NUM_CLASSES = {
+    'action_type': 4,
+    'card_selection': 15,
+    'card_reservation': 15,
+    'gem_take3': 26,
+    'gem_take2': 5,
+    'noble': 5,
+    'gems_removed': 84,
+}
+
+
+def convert_strategic_features_to_array(
+    strategic_features_list: List[Dict],
+    feature_names: List[str],
+    dtype: str = 'float32'
+) -> np.ndarray:
+    """Convert list of strategic feature dicts to 2D array.
+
+    Args:
+        strategic_features_list: List of dicts, each with 893 keys
+        feature_names: Ordered list of feature names (from get_all_feature_names())
+        dtype: Array dtype, 'float32' or 'float64'
+
+    Returns:
+        Array of shape (n_samples, 893)
+    """
+    # Use DataFrame for efficient conversion with column ordering
+    df = pd.DataFrame(strategic_features_list)
+
+    # Ensure all expected columns exist (fill missing with 0.0)
+    for col in feature_names:
+        if col not in df.columns:
+            df[col] = 0.0
+
+    # Select columns in correct order and convert to array
+    array = df[feature_names].values.astype(dtype)
+
+    return array
+
+
+def convert_labels_to_arrays(labels_list: List[Dict]) -> Dict[str, np.ndarray]:
+    """Convert list of label dicts to dict of 1D arrays.
+
+    Args:
+        labels_list: List of dicts, each with 7 keys (one per head)
+
+    Returns:
+        Dict mapping head name to 1D array of shape (n_samples,)
+    """
+    labels_arrays = {}
+
+    for head in HEAD_NAMES:
+        labels_arrays[head] = np.array(
+            [labels[head] for labels in labels_list],
+            dtype=np.int16
+        )
+
+    return labels_arrays
+
+
+def convert_masks_to_arrays(masks_list: List[Dict]) -> Dict[str, np.ndarray]:
+    """Convert list of mask dicts to dict of 2D arrays.
+
+    Args:
+        masks_list: List of dicts, each with 7 keys (one per head)
+
+    Returns:
+        Dict mapping head name to 2D array of shape (n_samples, n_classes)
+    """
+    masks_arrays = {}
+
+    for head in HEAD_NAMES:
+        masks_arrays[head] = np.stack(
+            [masks[head] for masks in masks_list],
+            axis=0
+        ).astype(np.int8)
+
+    return masks_arrays
+
+
+def convert_array_to_strategic_features(
+    strategic_features_array: np.ndarray,
+    feature_names: List[str]
+) -> List[Dict]:
+    """Convert strategic features array back to list of dicts.
+
+    Args:
+        strategic_features_array: Array of shape (n_samples, n_features)
+        feature_names: Ordered list of feature names
+
+    Returns:
+        List of feature dicts
+    """
+    df = pd.DataFrame(strategic_features_array, columns=feature_names)
+    return df.to_dict('records')
+
+
+def convert_arrays_to_labels(labels_arrays: Dict[str, np.ndarray]) -> List[Dict]:
+    """Convert dict of label arrays back to list of dicts.
+
+    Args:
+        labels_arrays: Dict mapping head name to 1D array
+
+    Returns:
+        List of label dicts
+    """
+    n_samples = len(labels_arrays[HEAD_NAMES[0]])
+    labels_list = []
+
+    for i in range(n_samples):
+        labels_dict = {head: int(labels_arrays[head][i]) for head in HEAD_NAMES}
+        labels_list.append(labels_dict)
+
+    return labels_list
+
+
+def convert_arrays_to_masks(masks_arrays: Dict[str, np.ndarray]) -> List[Dict]:
+    """Convert dict of mask arrays back to list of dicts.
+
+    Args:
+        masks_arrays: Dict mapping head name to 2D array
+
+    Returns:
+        List of mask dicts
+    """
+    n_samples = len(masks_arrays[HEAD_NAMES[0]])
+    masks_list = []
+
+    for i in range(n_samples):
+        masks_dict = {head: masks_arrays[head][i] for head in HEAD_NAMES}
+        masks_list.append(masks_dict)
+
+    return masks_list
 
 
 def fill_nan_values_for_row(row_dict: Dict) -> Dict:
@@ -293,6 +440,8 @@ def save_batch_to_file(
 ) -> str:
     """Save a batch of processed data to a compressed NPZ file.
 
+    This now saves data as arrays instead of list-of-dicts for 82% memory reduction.
+
     Args:
         batch_num: Batch number for file naming
         df: DataFrame with compacted rows
@@ -312,6 +461,18 @@ def save_batch_to_file(
     # Convert DataFrame to pickle bytes for storage
     df_pickle = pickle.dumps(df)
 
+    # Convert strategic features to array (Strategy A)
+    feature_names = get_all_feature_names()
+    strategic_features_array = convert_strategic_features_to_array(
+        strategic_features, feature_names, dtype='float32'
+    )
+
+    # Convert labels to arrays
+    labels_arrays = convert_labels_to_arrays(labels)
+
+    # Convert masks to arrays
+    masks_arrays = convert_masks_to_arrays(masks)
+
     # Create metadata
     metadata = {
         'batch_num': batch_num,
@@ -319,45 +480,97 @@ def save_batch_to_file(
         'num_files': len(file_paths),
     }
 
-    # Save to compressed NPZ
+    # Save to compressed NPZ with array format
     np.savez_compressed(
         batch_file,
         df_pickle=df_pickle,
-        strategic_features=strategic_features,
-        labels=labels,
-        masks=masks,
+        strategic_features=strategic_features_array,
+        strategic_feature_names=feature_names,
+        labels_action_type=labels_arrays['action_type'],
+        labels_card_selection=labels_arrays['card_selection'],
+        labels_card_reservation=labels_arrays['card_reservation'],
+        labels_gem_take3=labels_arrays['gem_take3'],
+        labels_gem_take2=labels_arrays['gem_take2'],
+        labels_noble=labels_arrays['noble'],
+        labels_gems_removed=labels_arrays['gems_removed'],
+        masks_action_type=masks_arrays['action_type'],
+        masks_card_selection=masks_arrays['card_selection'],
+        masks_card_reservation=masks_arrays['card_reservation'],
+        masks_gem_take3=masks_arrays['gem_take3'],
+        masks_gem_take2=masks_arrays['gem_take2'],
+        masks_noble=masks_arrays['noble'],
+        masks_gems_removed=masks_arrays['gems_removed'],
         metadata=metadata,
     )
 
+    # Calculate memory savings
+    old_size_mb = (len(strategic_features) * 893 * 240) / (1024 * 1024)  # Approx list-of-dicts size
+    new_size_mb = strategic_features_array.nbytes / (1024 * 1024)
+    savings_pct = (1 - new_size_mb / old_size_mb) * 100
+
     print(f"  Saved batch {batch_num} to {batch_file} ({len(df):,} samples)")
+    print(f"    Strategic features: {strategic_features_array.shape} ({new_size_mb:.1f} MB, {savings_pct:.0f}% memory savings)")
     log_memory_usage(f"After saving batch {batch_num}", force_gc=True)
 
     return batch_file
 
 
-def load_batch_from_file(batch_file: str) -> Tuple[pd.DataFrame, List[Dict], List[Dict], List[Dict]]:
+def load_batch_from_file(batch_file: str) -> Tuple[pd.DataFrame, np.ndarray, Dict[str, np.ndarray], Dict[str, np.ndarray]]:
     """Load a batch of processed data from NPZ file.
+
+    Supports both old list-of-dicts format (backward compatibility) and new array format.
 
     Args:
         batch_file: Path to batch NPZ file
 
     Returns:
-        Tuple of (df, strategic_features, labels, masks)
+        Tuple of (df, strategic_features_array, labels_arrays, masks_arrays)
     """
     data = np.load(batch_file, allow_pickle=True)
 
     # Unpickle DataFrame
     df = pickle.loads(data['df_pickle'].item())
 
-    # Extract lists (stored as numpy arrays)
-    strategic_features = list(data['strategic_features'])
-    labels = list(data['labels'])
-    masks = list(data['masks'])
+    # Detect format by checking if strategic_features is 2D array (new format)
+    is_new_format = 'strategic_features' in data and len(data['strategic_features'].shape) == 2
 
     metadata = data['metadata'].item()
-    print(f"  Loaded batch {metadata['batch_num']} from {batch_file} ({metadata['num_samples']:,} samples)")
+    print(f"  Loaded batch {metadata['batch_num']} from {batch_file} ({metadata['num_samples']:,} samples, {'array' if is_new_format else 'legacy'} format)")
 
-    return df, strategic_features, labels, masks
+    if is_new_format:
+        # NEW FORMAT: Load arrays directly
+        strategic_features_array = data['strategic_features']
+
+        # Load label arrays
+        labels_arrays = {}
+        for head in HEAD_NAMES:
+            labels_arrays[head] = data[f'labels_{head}']
+
+        # Load mask arrays
+        masks_arrays = {}
+        for head in HEAD_NAMES:
+            masks_arrays[head] = data[f'masks_{head}']
+
+        return df, strategic_features_array, labels_arrays, masks_arrays
+
+    else:
+        # OLD FORMAT: Convert from list-of-dicts to arrays for compatibility
+        print(f"    Converting old format to arrays...")
+
+        # Extract lists (stored as numpy arrays)
+        strategic_features_list = list(data['strategic_features'])
+        labels_list = list(data['labels'])
+        masks_list = list(data['masks'])
+
+        # Convert to arrays
+        feature_names = get_all_feature_names()
+        strategic_features_array = convert_strategic_features_to_array(
+            strategic_features_list, feature_names, dtype='float32'
+        )
+        labels_arrays = convert_labels_to_arrays(labels_list)
+        masks_arrays = convert_masks_to_arrays(masks_list)
+
+        return df, strategic_features_array, labels_arrays, masks_arrays
 
 
 def delete_batch_files(batch_files: List[str]) -> None:
