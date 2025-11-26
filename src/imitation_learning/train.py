@@ -68,7 +68,7 @@ def compute_class_weights(labels: np.ndarray, num_classes: int, device: torch.de
     return torch.tensor(weights, dtype=torch.float32, device=device)
 
 
-def apply_legal_action_mask(logits: torch.Tensor, legal_masks: torch.Tensor) -> torch.Tensor:
+def apply_legal_action_mask(logits: torch.Tensor, legal_masks: torch.Tensor, enable_masking: bool = True) -> torch.Tensor:
     """
     Apply legal action masks to logits by setting illegal actions to -inf.
 
@@ -79,10 +79,16 @@ def apply_legal_action_mask(logits: torch.Tensor, legal_masks: torch.Tensor) -> 
         logits: Predicted logits of shape (batch_size, num_classes)
         legal_masks: Binary masks of shape (batch_size, num_classes)
                     where 1 = legal action, 0 = illegal action
+        enable_masking: If False, return logits unchanged (default: True)
 
     Returns:
         Masked logits of shape (batch_size, num_classes) with illegal actions set to -1e9
+        (or unchanged if enable_masking=False)
     """
+    if not enable_masking:
+        # Return raw logits without masking
+        return logits
+
     # Convert mask to same device as logits
     legal_masks = legal_masks.to(logits.device)
 
@@ -238,7 +244,8 @@ def train_one_epoch(
     dataloader: torch.utils.data.DataLoader,
     optimizer: torch.optim.Optimizer,
     device: torch.device,
-    gradient_clip_norm: Optional[float] = None
+    gradient_clip_norm: Optional[float] = None,
+    enable_masking: bool = True
 ) -> Tuple[float, Dict[str, float], Dict[str, float]]:
     """
     Train model for one epoch.
@@ -249,6 +256,7 @@ def train_one_epoch(
         optimizer: Optimizer
         device: Device to run on
         gradient_clip_norm: Optional gradient clipping value
+        enable_masking: If False, skip masking during accuracy computation (default: True)
 
     Returns:
         Tuple[float, Dict[str, float], Dict[str, float]]: Tuple of (average_total_loss, dict_of_average_per_head_losses, dict_of_per_head_accuracies)
@@ -300,7 +308,7 @@ def train_one_epoch(
 
         # Action type accuracy (always compute) - apply legal action mask
         action_type_preds = compute_masked_predictions(
-            outputs['action_type'], masks['action_type']
+            outputs['action_type'], masks['action_type'], enable_masking
         ).cpu().numpy()
         accuracies_accum['action_type'].append(compute_accuracy(action_type_preds, action_types))
 
@@ -311,7 +319,7 @@ def train_one_epoch(
         card_sel_mask = build_mask & card_sel_valid
         if card_sel_mask.any():
             card_sel_preds = compute_masked_predictions(
-                outputs['card_selection'], masks['card_selection']
+                outputs['card_selection'], masks['card_selection'], enable_masking
             ).cpu().numpy()
             accuracies_accum['card_selection'].append(
                 compute_accuracy(card_sel_preds, card_sel_labels, card_sel_mask)
@@ -324,7 +332,7 @@ def train_one_epoch(
         card_res_mask = reserve_mask & card_res_valid
         if card_res_mask.any():
             card_res_preds = compute_masked_predictions(
-                outputs['card_reservation'], masks['card_reservation']
+                outputs['card_reservation'], masks['card_reservation'], enable_masking
             ).cpu().numpy()
             accuracies_accum['card_reservation'].append(
                 compute_accuracy(card_res_preds, card_res_labels, card_res_mask)
@@ -337,7 +345,7 @@ def train_one_epoch(
         gem3_mask = take3_mask & gem3_valid
         if gem3_mask.any():
             gem3_preds = compute_masked_predictions(
-                outputs['gem_take3'], masks['gem_take3']
+                outputs['gem_take3'], masks['gem_take3'], enable_masking
             ).cpu().numpy()
             accuracies_accum['gem_take3'].append(
                 compute_accuracy(gem3_preds, gem3_labels, gem3_mask)
@@ -350,7 +358,7 @@ def train_one_epoch(
         gem2_mask = take2_mask & gem2_valid
         if gem2_mask.any():
             gem2_preds = compute_masked_predictions(
-                outputs['gem_take2'], masks['gem_take2']
+                outputs['gem_take2'], masks['gem_take2'], enable_masking
             ).cpu().numpy()
             accuracies_accum['gem_take2'].append(
                 compute_accuracy(gem2_preds, gem2_labels, gem2_mask)
@@ -362,7 +370,7 @@ def train_one_epoch(
         noble_mask = build_mask & noble_valid
         if noble_mask.any():
             noble_preds = compute_masked_predictions(
-                outputs['noble'], masks['noble']
+                outputs['noble'], masks['noble'], enable_masking
             ).cpu().numpy()
             accuracies_accum['noble'].append(
                 compute_accuracy(noble_preds, noble_labels, noble_mask)
@@ -373,7 +381,7 @@ def train_one_epoch(
         gems_rem_mask = gems_rem_labels != 0
         if gems_rem_mask.any():
             gems_rem_preds = compute_masked_predictions(
-                outputs['gems_removed'], masks['gems_removed']
+                outputs['gems_removed'], masks['gems_removed'], enable_masking
             ).cpu().numpy()
             accuracies_accum['gems_removed'].append(
                 compute_accuracy(gems_rem_preds, gems_rem_labels, gems_rem_mask)
@@ -398,7 +406,8 @@ def train_one_epoch(
 def validate(
     model: nn.Module,
     dataloader: torch.utils.data.DataLoader,
-    device: torch.device
+    device: torch.device,
+    enable_masking: bool = True
 ) -> Tuple[float, Dict[str, float], Dict[str, float]]:
     """
     Validate model on validation set.
@@ -407,6 +416,7 @@ def validate(
         model: Neural network model
         dataloader: Validation data loader
         device: Device to run on
+        enable_masking: If False, skip masking during accuracy computation (default: True)
 
     Returns:
         Tuple of (avg_total_loss, dict_of_avg_per_head_losses, dict_of_per_head_accuracies)
@@ -447,7 +457,7 @@ def validate(
 
             # Action type accuracy (always compute) - apply legal action mask
             action_type_preds = compute_masked_predictions(
-                outputs['action_type'], masks['action_type']
+                outputs['action_type'], masks['action_type'], enable_masking
             ).cpu().numpy()
             accuracies_accum['action_type'].append(compute_accuracy(action_type_preds, action_types))
 
@@ -458,7 +468,7 @@ def validate(
             card_sel_mask = build_mask & card_sel_valid
             if card_sel_mask.any():
                 card_sel_preds = compute_masked_predictions(
-                    outputs['card_selection'], masks['card_selection']
+                    outputs['card_selection'], masks['card_selection'], enable_masking
                 ).cpu().numpy()
                 accuracies_accum['card_selection'].append(
                     compute_accuracy(card_sel_preds, card_sel_labels, card_sel_mask)
@@ -471,7 +481,7 @@ def validate(
             card_res_mask = reserve_mask & card_res_valid
             if card_res_mask.any():
                 card_res_preds = compute_masked_predictions(
-                    outputs['card_reservation'], masks['card_reservation']
+                    outputs['card_reservation'], masks['card_reservation'], enable_masking
                 ).cpu().numpy()
                 accuracies_accum['card_reservation'].append(
                     compute_accuracy(card_res_preds, card_res_labels, card_res_mask)
@@ -484,7 +494,7 @@ def validate(
             gem3_mask = take3_mask & gem3_valid
             if gem3_mask.any():
                 gem3_preds = compute_masked_predictions(
-                    outputs['gem_take3'], masks['gem_take3']
+                    outputs['gem_take3'], masks['gem_take3'], enable_masking
                 ).cpu().numpy()
                 accuracies_accum['gem_take3'].append(
                     compute_accuracy(gem3_preds, gem3_labels, gem3_mask)
@@ -497,7 +507,7 @@ def validate(
             gem2_mask = take2_mask & gem2_valid
             if gem2_mask.any():
                 gem2_preds = compute_masked_predictions(
-                    outputs['gem_take2'], masks['gem_take2']
+                    outputs['gem_take2'], masks['gem_take2'], enable_masking
                 ).cpu().numpy()
                 accuracies_accum['gem_take2'].append(
                     compute_accuracy(gem2_preds, gem2_labels, gem2_mask)
@@ -509,7 +519,7 @@ def validate(
             noble_mask = build_mask & noble_valid
             if noble_mask.any():
                 noble_preds = compute_masked_predictions(
-                    outputs['noble'], masks['noble']
+                    outputs['noble'], masks['noble'], enable_masking
                 ).cpu().numpy()
                 accuracies_accum['noble'].append(
                     compute_accuracy(noble_preds, noble_labels, noble_mask)
@@ -520,7 +530,7 @@ def validate(
             gems_rem_mask = gems_rem_labels != 0
             if gems_rem_mask.any():
                 gems_rem_preds = compute_masked_predictions(
-                    outputs['gems_removed'], masks['gems_removed']
+                    outputs['gems_removed'], masks['gems_removed'], enable_masking
                 ).cpu().numpy()
                 accuracies_accum['gems_removed'].append(
                     compute_accuracy(gems_rem_preds, gems_rem_labels, gems_rem_mask)
@@ -714,13 +724,15 @@ def main():
         # Train
         train_loss, train_per_head_losses, train_per_head_accs = train_one_epoch(
             model, train_loader, optimizer, device,
-            gradient_clip_norm=config['training'].get('gradient_clip_norm')
+            gradient_clip_norm=config['training'].get('gradient_clip_norm'),
+            enable_masking=config['training'].get('enable_masking', True)
         )
         train_losses.append(train_loss)
 
         # Validate
         val_loss, val_per_head_losses, val_per_head_accs = validate(
-            model, val_loader, device
+            model, val_loader, device,
+            enable_masking=config['training'].get('enable_masking', True)
         )
         val_losses.append(val_loss)
         for name, acc in val_per_head_accs.items():

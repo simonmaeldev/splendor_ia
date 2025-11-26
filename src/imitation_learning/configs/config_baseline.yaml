@@ -1,5 +1,5 @@
-# Medium Architecture Configuration (Default)
-# Recommended starting point for training
+# Baseline Configuration - No Feature Engineering, No Masking
+# This configuration recreates the original baseline dataset for comparison experiments
 
 seed: 42
 
@@ -17,15 +17,15 @@ preprocessing:
   batch_size: 500    # Process and save files in batches (reduces memory)
   use_float32: true  # Use float32 instead of float64 (50% memory savings)
   monitor_memory: true  # Enable memory monitoring during processing
-  intermediate_dir: "data/intermediate"  # Directory for batch files
+  intermediate_dir: "data/intermediate_baseline"  # Directory for batch files
   merge_strategy: "sequential"  # "sequential" (memory-efficient) or "accumulative" (legacy)
   enable_feature_engineering: false  # BASELINE: No strategic features
   enable_masking: false  # BASELINE: Generate all-ones masks (all actions legal)
 
 model:
   input_dim: null
-  trunk_dims: [512, 256]  # Standard trunk
-  head_dims: [128, 64]    # Two hidden layers per head
+  trunk_dims: [768, 512, 256]
+  head_dims: [256, 128, 64]
   dropout: 0.3
   num_classes:
     action_type: 4
@@ -39,8 +39,8 @@ model:
 training:
   batch_size: 256
   learning_rate: 0.001
-  epochs: 50
-  patience: 10
+  epochs: 150
+  patience: 20
   gradient_clip_norm: null
   enable_masking: false  # BASELINE: No masking during accuracy computation
   scheduler:
@@ -54,12 +54,15 @@ compute:
   num_workers: 12
 
 logging:
-  wandb_project: "splendor-ia"
+  wandb_project: "splendor-ia-baseline"
   wandb_entity: null
   log_interval: 1
   save_plots: true
 
+evaluation:
+  enable_masking: false  # BASELINE: No masking during evaluation
+
 checkpointing:
-  save_dir: "data/models"
+  save_dir: "data/models_baseline"
   save_every: 5
   keep_best_only: false

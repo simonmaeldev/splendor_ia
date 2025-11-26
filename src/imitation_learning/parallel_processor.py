@@ -76,13 +76,18 @@ def convert_strategic_features_to_array(
     """Convert list of strategic feature dicts to 2D array.
 
     Args:
-        strategic_features_list: List of dicts, each with 893 keys
+        strategic_features_list: List of dicts, each with 893 keys (or empty dicts if disabled)
         feature_names: Ordered list of feature names (from get_all_feature_names())
         dtype: Array dtype, 'float32' or 'float64'
 
     Returns:
-        Array of shape (n_samples, 893)
+        Array of shape (n_samples, 893) or (n_samples, 0) if all dicts are empty
     """
+    # Check if all dicts are empty (feature engineering disabled)
+    if all(len(d) == 0 for d in strategic_features_list):
+        n_samples = len(strategic_features_list)
+        return np.empty((n_samples, 0), dtype=dtype)
+
     # Use DataFrame for efficient conversion with column ordering
     df = pd.DataFrame(strategic_features_list)
 
@@ -305,18 +310,34 @@ def compact_cards_and_add_position_for_row(row_dict: Dict) -> Dict:
 def process_single_row(
     row_dict: Dict,
     board,
+    enable_feature_engineering: bool = True,
+    enable_masking: bool = True,
 ) -> Tuple[Dict, Dict[str, float], Dict[str, int], Dict[str, np.ndarray]]:
     """Process a single row: generate masks, fill NaN, compact cards, engineer features, encode labels.
 
     Args:
         row_dict: Row as dictionary
         board: Pre-reconstructed Board object (optimization!)
+        enable_feature_engineering: If False, skip strategic feature extraction (default: True)
+        enable_masking: If False, generate all-ones masks (default: True)
 
     Returns:
         Tuple of (row_compacted, strategic_features, labels_dict, masks_dict)
     """
-    # Generate masks (reusing board)
-    masks = generate_all_masks_from_row(row_dict, board=board)
+    # Generate masks (reusing board) or all-ones masks
+    if enable_masking:
+        masks = generate_all_masks_from_row(row_dict, board=board)
+    else:
+        # Generate all-ones masks (all actions legal)
+        masks = {
+            "action_type": np.ones(4, dtype=np.int8),
+            "card_selection": np.ones(15, dtype=np.int8),
+            "card_reservation": np.ones(15, dtype=np.int8),
+            "gem_take3": np.ones(26, dtype=np.int8),
+            "gem_take2": np.ones(5, dtype=np.int8),
+            "noble": np.ones(5, dtype=np.int8),
+            "gems_removed": np.ones(84, dtype=np.int8),
+        }
 
     # Fill NaN values
     row_filled = fill_nan_values_for_row(row_dict)
@@ -324,10 +345,15 @@ def process_single_row(
     # Compact cards and add position indices
     row_compacted = compact_cards_and_add_position_for_row(row_filled)
 
-    # Engineer features (reusing board)
-    # Convert dict to Series for feature engineering
+    # Convert dict to Series (needed for both feature engineering and label encoding)
     row_series = pd.Series(row_compacted)
-    strategic_features = extract_all_features(row_series, board=board)
+
+    # Engineer features (reusing board) if enabled
+    if enable_feature_engineering:
+        strategic_features = extract_all_features(row_series, board=board)
+    else:
+        # Return empty dict if feature engineering is disabled
+        strategic_features = {}
 
     # Encode labels
     labels = {}
@@ -391,6 +417,10 @@ def process_single_file(file_path: str, config: Dict) -> Tuple[List, List, List,
         # Load CSV file
         df = pd.read_csv(file_path)
 
+        # Get config flags
+        enable_feature_engineering = config.get("preprocessing", {}).get("enable_feature_engineering", True)
+        enable_masking = config.get("preprocessing", {}).get("enable_masking", True)
+
         # Accumulate results
         raw_rows = []
         strategic_features_list = []
@@ -402,12 +432,14 @@ def process_single_file(file_path: str, config: Dict) -> Tuple[List, List, List,
             row_dict = row.to_dict()
 
             try:
-                # Reconstruct board ONCE
-                board = reconstruct_board_from_csv_row(row_dict)
+                # Reconstruct board ONCE (only if needed for masking or feature engineering)
+                board = None
+                if enable_feature_engineering or enable_masking:
+                    board = reconstruct_board_from_csv_row(row_dict)
 
                 # Process row (reusing board for masks and features)
                 row_compacted, strategic_features, labels, masks = process_single_row(
-                    row_dict, board
+                    row_dict, board, enable_feature_engineering, enable_masking
                 )
 
                 raw_rows.append(row_compacted)

@@ -321,7 +321,7 @@ def combine_masks(*masks: np.ndarray) -> np.ndarray:
     return result
 
 
-def compute_masked_predictions(logits: torch.Tensor, legal_masks: torch.Tensor) -> torch.Tensor:
+def compute_masked_predictions(logits: torch.Tensor, legal_masks: torch.Tensor, enable_masking: bool = True) -> torch.Tensor:
     """Apply legal action masks before computing predictions.
 
     This function applies strong negative masks to illegal actions before computing
@@ -335,17 +335,25 @@ def compute_masked_predictions(logits: torch.Tensor, legal_masks: torch.Tensor) 
         logits: Predicted logits of shape (batch_size, num_classes)
         legal_masks: Binary masks of shape (batch_size, num_classes)
                     where 1 = legal action, 0 = illegal action
+        enable_masking: If False, return raw argmax without applying masks (default: True)
 
     Returns:
         Predicted class indices of shape (batch_size,) with illegal actions masked
+        (or unmasked if enable_masking=False)
 
     Example:
         >>> logits = torch.tensor([[0.5, 1.2, 0.8], [0.1, 0.9, 0.4]])
         >>> masks = torch.tensor([[1, 0, 1], [1, 1, 0]])
         >>> compute_masked_predictions(logits, masks)
         tensor([1, 1])  # Selects legal action with highest logit
+        >>> compute_masked_predictions(logits, masks, enable_masking=False)
+        tensor([1, 1])  # Selects action with highest logit (ignores masks)
 
     """
+    if not enable_masking:
+        # Return raw argmax predictions without masking
+        return logits.argmax(dim=1)
+
     # Apply strong negative mask to illegal actions
     masked_logits = logits + (1 - legal_masks) * -1e10
 

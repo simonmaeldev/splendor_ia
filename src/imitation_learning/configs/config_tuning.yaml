@@ -19,6 +19,8 @@ preprocessing:
   monitor_memory: true  # Enable memory monitoring during processing
   intermediate_dir: "data/intermediate"  # Directory for batch files
   merge_strategy: "sequential"  # "sequential" (memory-efficient) or "accumulative" (legacy)
+  enable_feature_engineering: true  # Extract strategic features
+  enable_masking: true  # Generate legal action masks
 
 model:
   input_dim: null
@@ -40,6 +42,7 @@ training:
   epochs: 150
   patience: 20
   gradient_clip_norm: null
+  enable_masking: true  # Apply masking during training accuracy computation
   scheduler:
     enabled: true
     mode: "min"
@@ -55,6 +58,9 @@ logging:
   wandb_entity: null
   log_interval: 1
   save_plots: true
+
+evaluation:
+  enable_masking: true  # Apply masking during evaluation (disable for baseline)
 
 checkpointing:
   save_dir: "data/models"

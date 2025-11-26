@@ -418,18 +418,25 @@ def identify_column_groups(df: pd.DataFrame) -> Tuple[List[str], List[str], List
 def engineer_features(
     df: pd.DataFrame,
     feature_cols: List[str],
+    config: dict = None,
 ) -> Tuple[pd.DataFrame, List[str], List[str], List[str]]:
     """Perform feature engineering including one-hot encoding and strategic features.
 
     Args:
         df: DataFrame with all data
         feature_cols: List of feature column names
+        config: Configuration dict with preprocessing settings (optional)
 
     Returns:
         Tuple of (engineered_df, new_feature_cols, onehot_col_names, strategic_col_names)
 
     """
     print("\nEngineering features...")
+
+    # Check if feature engineering is enabled
+    enable_feature_engineering = True
+    if config:
+        enable_feature_engineering = config.get("preprocessing", {}).get("enable_feature_engineering", True)
 
     # Create a copy to avoid modifying original
     df_eng = df.copy()
@@ -478,39 +485,45 @@ def engineer_features(
     print(f"  Created {len(onehot_cols)} one-hot encoded features")
     print(f"  Total features after one-hot encoding: {len(new_feature_cols)}")
 
-    # Extract strategic features (token, card, noble, player comparison, game progression)
-    print("\n  Extracting strategic features...")
-    strategic_features_list = []
+    strategic_cols = []
 
-    for idx, row in tqdm(
-        df_eng.iterrows(),
-        total=len(df_eng),
-        desc="  Extracting strategic features",
-    ):
-        features = extract_all_features(row)
-        strategic_features_list.append(features)
+    # Extract strategic features only if enabled
+    if enable_feature_engineering:
+        print("\n  Extracting strategic features...")
+        strategic_features_list = []
 
-    # Convert list of dicts to DataFrame
-    strategic_df = pd.DataFrame(strategic_features_list)
+        for idx, row in tqdm(
+            df_eng.iterrows(),
+            total=len(df_eng),
+            desc="  Extracting strategic features",
+        ):
+            features = extract_all_features(row)
+            strategic_features_list.append(features)
 
-    # Get expected feature names and fill missing columns with zeros
-    expected_feature_names = get_all_feature_names()
-    for feat_name in expected_feature_names:
-        if feat_name not in strategic_df.columns:
-            strategic_df[feat_name] = 0.0
+        # Convert list of dicts to DataFrame
+        strategic_df = pd.DataFrame(strategic_features_list)
 
-    # Reorder columns to match expected order
-    strategic_df = strategic_df[expected_feature_names]
+        # Get expected feature names and fill missing columns with zeros
+        expected_feature_names = get_all_feature_names()
+        for feat_name in expected_feature_names:
+            if feat_name not in strategic_df.columns:
+                strategic_df[feat_name] = 0.0
 
-    # Add strategic features to dataframe
-    df_eng = pd.concat([df_eng, strategic_df], axis=1)
+        # Reorder columns to match expected order
+        strategic_df = strategic_df[expected_feature_names]
 
-    # Add strategic feature names to feature list
-    strategic_cols = list(strategic_df.columns)
-    new_feature_cols.extend(strategic_cols)
+        # Add strategic features to dataframe
+        df_eng = pd.concat([df_eng, strategic_df], axis=1)
 
-    print(f"  Created {len(strategic_cols)} strategic features")
-    print(f"  Total features after all engineering: {len(new_feature_cols)}")
+        # Add strategic feature names to feature list
+        strategic_cols = list(strategic_df.columns)
+        new_feature_cols.extend(strategic_cols)
+
+        print(f"  Created {len(strategic_cols)} strategic features")
+        print(f"  Total features after all engineering: {len(new_feature_cols)}")
+    else:
+        print("  Strategic feature extraction DISABLED (baseline mode)")
+        print(f"  Total features: {len(new_feature_cols)}")
 
     return df_eng, new_feature_cols, onehot_cols, strategic_cols
 
@@ -641,7 +654,7 @@ def encode_labels(df: pd.DataFrame, label_cols: List[str]) -> Dict[str, np.ndarr
     return labels
 
 
-def generate_masks_for_dataframe(df: pd.DataFrame) -> Dict[str, np.ndarray]:
+def generate_masks_for_dataframe(df: pd.DataFrame, config: dict = None) -> Dict[str, np.ndarray]:
     """Generate legal action masks for all rows in the dataframe.
 
     For each row, reconstructs the board state and generates masks indicating
@@ -649,6 +662,7 @@ def generate_masks_for_dataframe(df: pd.DataFrame) -> Dict[str, np.ndarray]:
 
     Args:
         df: DataFrame with all game data
+        config: Configuration dict with preprocessing settings (optional)
 
     Returns:
         Dict mapping head name to mask array of shape (n_samples, n_classes_for_head)
@@ -662,6 +676,11 @@ def generate_masks_for_dataframe(df: pd.DataFrame) -> Dict[str, np.ndarray]:
     """
     print("\nGenerating legal action masks...")
 
+    # Check if masking is enabled
+    enable_masking = True
+    if config:
+        enable_masking = config.get("preprocessing", {}).get("enable_masking", True)
+
     # Initialize lists for each head
     head_names = [
         "action_type",
@@ -673,6 +692,24 @@ def generate_masks_for_dataframe(df: pd.DataFrame) -> Dict[str, np.ndarray]:
         "gems_removed",
     ]
     masks_per_head = {head: [] for head in head_names}
+
+    # If masking is disabled, generate all-ones masks
+    if not enable_masking:
+        print("  Masking DISABLED (baseline mode) - generating all-ones masks")
+        n_samples = len(df)
+        masks_dict = {
+            "action_type": np.ones((n_samples, 4), dtype=np.int8),
+            "card_selection": np.ones((n_samples, 15), dtype=np.int8),
+            "card_reservation": np.ones((n_samples, 15), dtype=np.int8),
+            "gem_take3": np.ones((n_samples, 26), dtype=np.int8),
+            "gem_take2": np.ones((n_samples, 5), dtype=np.int8),
+            "noble": np.ones((n_samples, 5), dtype=np.int8),
+            "gems_removed": np.ones((n_samples, get_num_gem_removal_classes()), dtype=np.int8),
+        }
+        for head in head_names:
+            print(f"  {head}: {masks_dict[head].shape}")
+        print(f"\n  Generated all-ones masks for {n_samples:,} samples")
+        return masks_dict
 
     # Track failures
     failure_count = 0
@@ -1312,7 +1349,7 @@ def main():
 
     # Generate masks BEFORE filling NaN (masks need original game state)
     # This is critical: fillna adds phantom nobles/cards that change legal moves
-    masks_all = generate_masks_for_dataframe(df)
+    masks_all = generate_masks_for_dataframe(df, config)
 
     # Now fill NaN for feature engineering
     df_filled = fill_nan_values(df)
@@ -1328,6 +1365,7 @@ def main():
     df_eng, feature_cols_eng, onehot_cols, strategic_cols = engineer_features(
         df_compacted,
         feature_cols,
+        config,
     )
 
     # Create normalization mask

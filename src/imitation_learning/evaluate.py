@@ -42,7 +42,8 @@ def load_config(config_path: str) -> Dict:
 def evaluate_action_type(
     model: nn.Module,
     dataloader: torch.utils.data.DataLoader,
-    device: torch.device
+    device: torch.device,
+    enable_masking: bool = True
 ) -> Dict:
     """
     Comprehensive evaluation of action_type head.
@@ -51,6 +52,7 @@ def evaluate_action_type(
         model: Trained model
         dataloader: Data loader (typically test set)
         device: Device to run on
+        enable_masking: If False, skip masking during evaluation (default: True)
 
     Returns:
         Dict containing overall accuracy, per-class accuracy, confusion matrix
@@ -67,7 +69,7 @@ def evaluate_action_type(
             outputs = model(states)
 
             # Apply legal action mask to enforce only legal actions
-            action_type_logits = apply_legal_action_mask(outputs['action_type'], masks['action_type'])
+            action_type_logits = apply_legal_action_mask(outputs['action_type'], masks['action_type'], enable_masking)
             preds = action_type_logits.argmax(dim=1).cpu().numpy()
             labs = labels['action_type'].cpu().numpy()
 
@@ -106,7 +108,8 @@ def evaluate_conditional_head(
     dataloader: torch.utils.data.DataLoader,
     device: torch.device,
     head_name: str,
-    action_type_filter: int
+    action_type_filter: int,
+    enable_masking: bool = True
 ) -> Dict:
     """
     Evaluate a conditional prediction head (only applicable for specific action types).
@@ -117,6 +120,7 @@ def evaluate_conditional_head(
         device: Device
         head_name: Name of the head to evaluate
         action_type_filter: Which action type this head applies to
+        enable_masking: If False, skip masking during evaluation (default: True)
 
     Returns:
         Dict containing accuracy and sample frequency
@@ -143,7 +147,7 @@ def evaluate_conditional_head(
 
             if combined_mask.any():
                 # Apply legal action mask to enforce only legal actions
-                head_logits = apply_legal_action_mask(outputs[head_name], legal_masks[head_name])
+                head_logits = apply_legal_action_mask(outputs[head_name], legal_masks[head_name], enable_masking)
                 preds = head_logits.argmax(dim=1).cpu().numpy()
                 all_preds.append(preds[combined_mask])
                 all_labels.append(head_labels[combined_mask])
@@ -170,7 +174,8 @@ def evaluate_conditional_head(
 def evaluate_overall_action_accuracy(
     model: nn.Module,
     dataloader: torch.utils.data.DataLoader,
-    device: torch.device
+    device: torch.device,
+    enable_masking: bool = True
 ) -> float:
     """
     Compute overall action accuracy: action_type correct AND target correct.
@@ -181,6 +186,7 @@ def evaluate_overall_action_accuracy(
         model: Trained model
         dataloader: Data loader
         device: Device
+        enable_masking: If False, skip masking during evaluation (default: True)
 
     Returns:
         Overall action accuracy
@@ -200,7 +206,7 @@ def evaluate_overall_action_accuracy(
             masked_outputs = {}
             for head_name in outputs.keys():
                 if head_name in legal_masks:
-                    masked_outputs[head_name] = apply_legal_action_mask(outputs[head_name], legal_masks[head_name])
+                    masked_outputs[head_name] = apply_legal_action_mask(outputs[head_name], legal_masks[head_name], enable_masking)
                 else:
                     masked_outputs[head_name] = outputs[head_name]
 

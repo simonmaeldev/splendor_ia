@@ -5,7 +5,7 @@ seed: 42
 
 data:
   data_root: "data/games"
-  processed_dir: "data/processed"
+  processed_dir: "data/processed_baseline"
   train_ratio: 0.8
   val_ratio: 0.1
   test_ratio: 0.1
@@ -19,6 +19,8 @@ preprocessing:
   monitor_memory: true  # Enable memory monitoring during processing
   intermediate_dir: "data/intermediate"  # Directory for batch files
   merge_strategy: "sequential"  # "sequential" (memory-efficient) or "accumulative" (legacy)
+  enable_feature_engineering: false  # BASELINE: No strategic features
+  enable_masking: false  # BASELINE: Generate all-ones masks (all actions legal)
 
 model:
   input_dim: null
@@ -40,6 +42,7 @@ training:
   epochs: 50
   patience: 10
   gradient_clip_norm: 1.0  # Gradient clipping for deeper network
+  enable_masking: false  # BASELINE: No masking during accuracy computation
   scheduler:
     enabled: true
     mode: "min"

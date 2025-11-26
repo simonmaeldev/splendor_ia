@@ -352,26 +352,36 @@ def process_merged_data(
         skip_validation: Whether to skip mask validation
 
     """
-    # Get expected feature names
-    expected_feature_names = get_all_feature_names()
+    # Check if strategic features are present (non-empty)
+    has_strategic_features = strategic_features_array.shape[1] > 0
 
-    # Create strategic DataFrame from array
-    strategic_df = pd.DataFrame(
-        strategic_features_array,
-        columns=expected_feature_names
-    )
+    if has_strategic_features:
+        # Get expected feature names
+        expected_feature_names = get_all_feature_names()
 
-    # Add strategic features to dataframe
-    df_eng = pd.concat(
-        [df_compacted.reset_index(drop=True), strategic_df.reset_index(drop=True)],
-        axis=1,
-    )
+        # Create strategic DataFrame from array
+        strategic_df = pd.DataFrame(
+            strategic_features_array,
+            columns=expected_feature_names
+        )
+
+        # Add strategic features to dataframe
+        df_eng = pd.concat(
+            [df_compacted.reset_index(drop=True), strategic_df.reset_index(drop=True)],
+            axis=1,
+        )
+        print(f"\nStrategic features: {strategic_features_array.shape[1]} columns")
+    else:
+        # No strategic features - just use compacted dataframe
+        df_eng = df_compacted.reset_index(drop=True)
+        strategic_df = pd.DataFrame()  # Empty dataframe
+        print("\nStrategic features: DISABLED (baseline mode)")
 
     # Identify column groups (use df_compacted which has raw features + position features)
     metadata_cols, label_cols, feature_cols = identify_column_groups(df_compacted)
 
     # Engineer one-hot features (current_player, num_players, positions)
-    print("\nEngineering one-hot features...")
+    print("Engineering one-hot features...")
     onehot_cols = []
 
     # One-hot encode current_player
@@ -410,8 +420,11 @@ def process_merged_data(
         new_feature_cols.append("turn_number")
 
     # Add strategic features (these are already in df_eng from the concat above)
-    strategic_cols = list(strategic_df.columns)
-    new_feature_cols.extend(strategic_cols)
+    if has_strategic_features:
+        strategic_cols = list(strategic_df.columns)
+        new_feature_cols.extend(strategic_cols)
+    else:
+        strategic_cols = []
 
     print(f"  Total features after engineering: {len(new_feature_cols)}")
 
