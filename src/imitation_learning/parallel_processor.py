@@ -42,6 +42,12 @@ from .constants import (
 )
 from .feature_engineering import extract_all_features, get_all_feature_names
 from .memory_monitor import log_memory_usage
+
+# Ensure src is in path for cross-package imports
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
 from utils.state_reconstruction import reconstruct_board_from_csv_row
 
 

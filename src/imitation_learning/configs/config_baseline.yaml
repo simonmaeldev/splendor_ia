@@ -59,9 +59,6 @@ logging:
   log_interval: 1
   save_plots: true
 
-evaluation:
-  enable_masking: false  # BASELINE: No masking during evaluation
-
 checkpointing:
   save_dir: "data/models_baseline"
   save_every: 5

@@ -28,13 +28,18 @@ Usage:
 
 from typing import List, Dict, Any, Optional
 import math
+import sys
+from pathlib import Path
+
+# Ensure src is in path for imports
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # Import game objects
-from src.splendor.cards import Card
-from src.splendor.characters import Character
-from src.splendor.player import Player
-from src.splendor.board import Board
-from src.splendor.constants import DECK1, DECK2, DECK3
+from splendor.cards import Card
+from splendor.characters import Character
+from splendor.player import Player
+from splendor.board import Board
+from splendor.constants import DECK1, DECK2, DECK3
 
 
 def parse_card_features(features: List[float]) -> Optional[Card]:

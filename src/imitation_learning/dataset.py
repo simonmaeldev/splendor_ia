@@ -107,12 +107,48 @@ def load_preprocessed_data(processed_dir: str) -> Tuple[
 
     print(f"  Labels: {list(labels_train.keys())}")
 
-    # Load masks
-    masks_train = dict(np.load(os.path.join(processed_dir, 'masks_train.npz')))
-    masks_val = dict(np.load(os.path.join(processed_dir, 'masks_val.npz')))
-    masks_test = dict(np.load(os.path.join(processed_dir, 'masks_test.npz')))
+    # Load masks (with backward compatibility for legacy data)
+    masks_train_path = os.path.join(processed_dir, 'masks_train.npz')
+    masks_val_path = os.path.join(processed_dir, 'masks_val.npz')
+    masks_test_path = os.path.join(processed_dir, 'masks_test.npz')
 
-    print(f"  Masks: {list(masks_train.keys())}")
+    if os.path.exists(masks_train_path):
+        # New format: masks files exist
+        print(f"  Detected NEW format (with masks)")
+        masks_train = dict(np.load(masks_train_path))
+        masks_val = dict(np.load(masks_val_path))
+        masks_test = dict(np.load(masks_test_path))
+        print(f"  Masks: {list(masks_train.keys())}")
+    else:
+        # Legacy format: generate dummy all-ones masks
+        print(f"  Detected LEGACY format (without masks) - generating dummy all-ones masks")
+
+        # Define number of classes for each head (based on game rules)
+        num_classes = {
+            'action_type': 4,        # BUILD, RESERVE, TAKE2, TAKE3
+            'card_selection': 15,    # 13 visible + 2 reserved
+            'card_reservation': 13,  # 12 visible + 1 from deck
+            'gem_take3': 10,         # combinations of 3 different colors from 5
+            'gem_take2': 5,          # which color to take 2 of
+            'noble': 6,              # 5 nobles + 1 for "no noble"
+            'gems_removed': 56       # combinations of gems to remove when overflow
+        }
+
+        # Generate all-ones masks for each split
+        masks_train = {
+            head: np.ones((X_train.shape[0], n_classes), dtype=np.float32)
+            for head, n_classes in num_classes.items()
+        }
+        masks_val = {
+            head: np.ones((X_val.shape[0], n_classes), dtype=np.float32)
+            for head, n_classes in num_classes.items()
+        }
+        masks_test = {
+            head: np.ones((X_test.shape[0], n_classes), dtype=np.float32)
+            for head, n_classes in num_classes.items()
+        }
+
+        print(f"  Generated masks: {list(masks_train.keys())}")
 
     return X_train, X_val, X_test, labels_train, labels_val, labels_test, masks_train, masks_val, masks_test
 
