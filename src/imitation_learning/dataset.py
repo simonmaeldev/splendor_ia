@@ -76,7 +76,10 @@ class SplendorDataset(Dataset):
         return state, labels_dict, masks_dict
 
 
-def load_preprocessed_data(processed_dir: str) -> Tuple[
+def load_preprocessed_data(
+    processed_dir: str,
+    num_classes: Dict[str, int] = None
+) -> Tuple[
     np.ndarray, np.ndarray, np.ndarray,
     Dict, Dict, Dict,
     Dict, Dict, Dict
@@ -86,6 +89,9 @@ def load_preprocessed_data(processed_dir: str) -> Tuple[
 
     Args:
         processed_dir: Directory containing preprocessed files
+        num_classes: Optional dict mapping head name to number of classes.
+                    Required when loading legacy data without masks.
+                    If not provided, uses default values from masking format.
 
     Returns:
         Tuple of (X_train, X_val, X_test, labels_train, labels_val, labels_test,
@@ -123,16 +129,21 @@ def load_preprocessed_data(processed_dir: str) -> Tuple[
         # Legacy format: generate dummy all-ones masks
         print(f"  Detected LEGACY format (without masks) - generating dummy all-ones masks")
 
-        # Define number of classes for each head (based on game rules)
-        num_classes = {
-            'action_type': 4,        # BUILD, RESERVE, TAKE2, TAKE3
-            'card_selection': 15,    # 13 visible + 2 reserved
-            'card_reservation': 13,  # 12 visible + 1 from deck
-            'gem_take3': 10,         # combinations of 3 different colors from 5
-            'gem_take2': 5,          # which color to take 2 of
-            'noble': 6,              # 5 nobles + 1 for "no noble"
-            'gems_removed': 56       # combinations of gems to remove when overflow
-        }
+        # Define number of classes for each head
+        if num_classes is None:
+            # Default values for masking format (with feature engineering)
+            num_classes = {
+                'action_type': 4,        # BUILD, RESERVE, TAKE2, TAKE3
+                'card_selection': 15,    # 13 visible + 2 reserved
+                'card_reservation': 13,  # 12 visible + 1 from deck
+                'gem_take3': 10,         # combinations of 3 different colors from 5
+                'gem_take2': 5,          # which color to take 2 of
+                'noble': 6,              # 5 nobles + 1 for "no noble"
+                'gems_removed': 56       # combinations of gems to remove when overflow
+            }
+            print(f"  Using default num_classes (masking format)")
+        else:
+            print(f"  Using provided num_classes from model config")
 
         # Generate all-ones masks for each split
         masks_train = {
@@ -156,7 +167,8 @@ def load_preprocessed_data(processed_dir: str) -> Tuple[
 def create_dataloaders(
     processed_dir: str,
     batch_size: int,
-    num_workers: int = 4
+    num_workers: int = 4,
+    num_classes: Dict[str, int] = None
 ) -> Tuple[DataLoader, DataLoader, DataLoader]:
     """
     Create DataLoaders for train, validation, and test sets.
@@ -165,6 +177,8 @@ def create_dataloaders(
         processed_dir: Directory containing preprocessed data files
         batch_size: Batch size for DataLoader
         num_workers: Number of workers for parallel data loading
+        num_classes: Optional dict mapping head name to number of classes.
+                    Required when loading legacy data without masks.
 
     Returns:
         Tuple of (train_loader, val_loader, test_loader)
@@ -182,7 +196,7 @@ def create_dataloaders(
     # Load preprocessed data
     (X_train, X_val, X_test,
      labels_train, labels_val, labels_test,
-     masks_train, masks_val, masks_test) = load_preprocessed_data(processed_dir)
+     masks_train, masks_val, masks_test) = load_preprocessed_data(processed_dir, num_classes)
 
     # Create datasets
     train_dataset = SplendorDataset(X_train, labels_train, masks_train)

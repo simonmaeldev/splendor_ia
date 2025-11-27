@@ -18,6 +18,22 @@
                 "PYTHONPATH": "${workspaceFolder}/src"
             },
             "justMyCode": false
+        },
+        {
+            "name": "Debug play_with_model",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/scripts/play_with_model.py",
+            "args": [
+                "--model",
+                "data/models/202511241159_config_tuning/best_model.pth",
+                "--games",
+                "1",
+                "--display"
+            ],
+            "console": "integratedTerminal",
+            "python": "${workspaceFolder}/.venv/bin/python",
+            "justMyCode": false
         }
     ]
 }

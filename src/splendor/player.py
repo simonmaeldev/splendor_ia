@@ -22,6 +22,8 @@ class Player:
         # State tracking for performance (avoid reconstruction)
         self.vp: int = 0
         self.reductions: List[int] = [0, 0, 0, 0, 0]
+        # Model player instance (lazy-loaded)
+        self.model_player: Optional[Any] = None
 
     def __eq__(self, other: object) -> bool:
         return other != None and self.idCustom == other.idCustom
@@ -69,8 +71,32 @@ class Player:
                 action = int(input())
             return action
         else:
-            self.action = IA.getAction(board)
-            return action[0]
+            # Check if this is a MODEL AI player
+            if self.IA and self.IA.startswith("MODEL:"):
+                # Extract model path from IA string
+                model_path = self.IA[6:]  # Remove "MODEL:" prefix
+
+                # Lazy-load ModelPlayer instance (only once)
+                if self.model_player is None:
+                    from .ai_player import ModelPlayer
+                    self.model_player = ModelPlayer(model_path)
+
+                # Get action from model
+                move = self.model_player.get_action(board)
+
+                # Convert Move object to expected format [action_type, main_action, complementary_action]
+                self.action = [move.actionType, move.action, move.tokensToRemove]
+
+                # Store noble selection separately if needed (for compatibility)
+                if move.character is not None:
+                    # Noble will be handled by game engine checking move.character
+                    pass
+
+                return move.actionType
+            else:
+                # Other AI types (e.g., MCTS) would go here
+                # For now, raise an error if IA type is not recognized
+                raise NotImplementedError(f"AI type '{self.IA}' is not implemented yet")
 
     def getFinalAction(self) -> Any:
         return self.action[1]
