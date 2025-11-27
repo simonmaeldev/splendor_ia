@@ -29,12 +29,12 @@ from tqdm import tqdm
 # ============================================================================
 # List of model checkpoint directories (each contains config.yaml and best_model.pth)
 MODEL_DIRS = [
-    # "data/models/202511261002_config_small",     # <- baseline
-    # "data/models/202511261024_config_medium",
-    # "data/models/202511261041_config_large",
-    # "data/models/202511230802_config_small",     # <- masking of illegal actions
-    # "data/models/202511230816_config_medium",
-    # "data/models/202511230830_config_large",
+    "data/models/202511261535_config_small_baseline",     # <- baseline
+    "data/models/202511261614_config_medium_baseline",
+    "data/models/202511261646_config_large_baseline",
+    "data/models/202511261555_config_small_mask",     # <- masking of illegal actions
+    "data/models/202511261626_config_medium_mask",
+    "data/models/202511261710_config_large_mask",
     "data/models/202511240928_config_small",     # <- feature engineering
     "data/models/202511241025_config_tuning",    # <- 512,512,256  128,64   100,10
     "data/models/202511241159_config_tuning",    # <- 768,512,256  256,128,64   150,20
@@ -287,7 +287,8 @@ def main():
             _, val_loader, _ = create_dataloaders(
                 config['data']['processed_dir'],
                 config['training']['batch_size'],
-                config['compute']['num_workers']
+                config['compute']['num_workers'],
+                num_classes=config['model'].get('num_classes', None)
             )
             print(f"Validation set size: {len(val_loader.dataset)} samples")
 

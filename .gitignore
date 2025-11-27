@@ -143,11 +143,12 @@ data/games/4_games/*.csv.backup
 data/processed/
 .aider*
 
-data/models/
+data/models/*/
 logs/
 wandb/
 
 # Intermediate batch files
 data/intermediate/*.npz
-data/processed_backup_feature_and_masking
-data/processed_baseline
+
+data/processed*
+data/models/deleted
