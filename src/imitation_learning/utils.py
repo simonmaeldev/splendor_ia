@@ -395,6 +395,87 @@ def compute_accuracy(
     return np.mean(predictions == labels)
 
 
+def compute_classification_metrics(
+    predictions: np.ndarray,
+    labels: np.ndarray,
+    num_classes: int,
+    mask: Optional[np.ndarray] = None,
+) -> Dict[str, float]:
+    """Compute comprehensive classification metrics.
+
+    Args:
+        predictions: Array of predicted class indices
+        labels: Array of true class indices
+        num_classes: Total number of classes
+        mask: Optional boolean mask to filter samples (e.g., exclude -1 labels)
+
+    Returns:
+        Dict containing accuracy, precision, recall (sensitivity), specificity, and f_score
+        All metrics are macro-averaged across classes.
+
+    Example:
+        >>> predictions = np.array([0, 1, 2, 0, 1])
+        >>> labels = np.array([0, 1, 0, 0, 1])
+        >>> metrics = compute_classification_metrics(predictions, labels, 3)
+        >>> metrics.keys()
+        dict_keys(['accuracy', 'precision', 'recall', 'specificity', 'f_score'])
+
+    """
+    if mask is not None:
+        predictions = predictions[mask]
+        labels = labels[mask]
+
+    if len(labels) == 0:
+        return {
+            'accuracy': 0.0,
+            'precision': 0.0,
+            'recall': 0.0,
+            'specificity': 0.0,
+            'f_score': 0.0
+        }
+
+    # Accuracy
+    accuracy = np.mean(predictions == labels)
+
+    # Compute per-class metrics
+    precisions = []
+    recalls = []
+    specificities = []
+    f_scores = []
+
+    for class_idx in range(num_classes):
+        # True positives, false positives, false negatives, true negatives
+        tp = np.sum((predictions == class_idx) & (labels == class_idx))
+        fp = np.sum((predictions == class_idx) & (labels != class_idx))
+        fn = np.sum((predictions != class_idx) & (labels == class_idx))
+        tn = np.sum((predictions != class_idx) & (labels != class_idx))
+
+        # Precision: TP / (TP + FP)
+        precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+        precisions.append(precision)
+
+        # Recall (Sensitivity): TP / (TP + FN)
+        recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+        recalls.append(recall)
+
+        # Specificity: TN / (TN + FP)
+        specificity = tn / (tn + fp) if (tn + fp) > 0 else 0.0
+        specificities.append(specificity)
+
+        # F-score: 2 * (Precision * Recall) / (Precision + Recall)
+        f_score = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
+        f_scores.append(f_score)
+
+    # Macro-average across classes
+    return {
+        'accuracy': float(accuracy),
+        'precision': float(np.mean(precisions)),
+        'recall': float(np.mean(recalls)),
+        'specificity': float(np.mean(specificities)),
+        'f_score': float(np.mean(f_scores))
+    }
+
+
 def compute_confusion_matrix(
     predictions: np.ndarray,
     labels: np.ndarray,
@@ -551,6 +632,77 @@ def plot_per_class_accuracy(accuracies: Dict[str, float], save_path: str) -> Non
     plt.grid(True, axis="y", alpha=0.3)
     plt.tight_layout()
     plt.savefig(save_path, dpi=150, bbox_inches="tight")
+    plt.close()
+
+
+def plot_classification_metrics(
+    metrics_per_head: Dict[str, Dict[str, float]],
+    save_path: str
+) -> None:
+    """Plot comprehensive classification metrics (accuracy, precision, recall, specificity, f-score).
+
+    Args:
+        metrics_per_head: Dict mapping head name to dict of metrics
+                         Each inner dict should have keys: 'accuracy', 'precision', 'recall', 'specificity', 'f_score'
+        save_path: Path to save the figure
+
+    Example:
+        >>> metrics = {
+        ...     'action_type': {'accuracy': 0.82, 'precision': 0.80, 'recall': 0.78, 'specificity': 0.92, 'f_score': 0.79},
+        ...     'card_selection': {'accuracy': 0.65, 'precision': 0.63, 'recall': 0.60, 'specificity': 0.88, 'f_score': 0.61}
+        ... }
+        >>> plot_classification_metrics(metrics, 'logs/metrics.png')
+
+    """
+    heads = list(metrics_per_head.keys())
+    metric_names = ['accuracy', 'precision', 'recall', 'specificity', 'f_score']
+    metric_labels = ['Accuracy', 'Precision', 'Recall (Sensitivity)', 'Specificity', 'F-Score']
+
+    # Prepare data
+    data = {metric: [] for metric in metric_names}
+    for head in heads:
+        for metric in metric_names:
+            data[metric].append(metrics_per_head[head].get(metric, 0.0))
+
+    # Create grouped bar chart
+    fig, ax = plt.subplots(figsize=(15, 8))
+
+    x = np.arange(len(heads))
+    width = 0.15  # Width of each bar
+
+    colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd']
+
+    # Plot bars for each metric
+    for i, (metric, label) in enumerate(zip(metric_names, metric_labels)):
+        offset = width * (i - 2)  # Center the bars around each position
+        bars = ax.bar(x + offset, data[metric], width, label=label, color=colors[i], alpha=0.8)
+
+        # Add value labels on bars
+        for bar in bars:
+            height = bar.get_height()
+            # Show label for all bars, but adjust font size for small bars
+            fontsize = 8 if height > 0.05 else 6
+            ax.text(
+                bar.get_x() + bar.get_width() / 2,
+                height + 0.01,
+                f'{height:.2f}',
+                ha='center',
+                va='bottom',
+                fontsize=fontsize,
+                rotation=0
+            )
+
+    ax.set_xlabel('Prediction Head', fontsize=12, fontweight='bold')
+    ax.set_ylabel('Score', fontsize=12, fontweight='bold')
+    ax.set_title('Classification Metrics by Prediction Head', fontsize=14, fontweight='bold')
+    ax.set_xticks(x)
+    ax.set_xticklabels(heads, rotation=45, ha='right')
+    ax.set_ylim(0, 1.05)
+    ax.legend(loc='upper right', fontsize=10)
+    ax.grid(True, axis='y', alpha=0.3)
+
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=150, bbox_inches='tight')
     plt.close()
 
 

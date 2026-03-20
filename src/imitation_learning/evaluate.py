@@ -25,9 +25,11 @@ from .model import MultiHeadSplendorNet
 from .train import apply_legal_action_mask
 from .utils import (
     compute_accuracy,
+    compute_classification_metrics,
     compute_confusion_matrix,
     plot_confusion_matrix,
     plot_per_class_accuracy,
+    plot_classification_metrics,
     set_seed
 )
 
@@ -79,8 +81,8 @@ def evaluate_action_type(
     all_preds = np.concatenate(all_preds)
     all_labels = np.concatenate(all_labels)
 
-    # Overall accuracy
-    overall_acc = compute_accuracy(all_preds, all_labels)
+    # Compute comprehensive metrics
+    metrics = compute_classification_metrics(all_preds, all_labels, num_classes=4)
 
     # Per-class accuracy
     per_class_acc = {}
@@ -96,7 +98,11 @@ def evaluate_action_type(
     cm = compute_confusion_matrix(all_preds, all_labels, num_classes=4)
 
     return {
-        'overall_accuracy': float(overall_acc),
+        'overall_accuracy': float(metrics['accuracy']),
+        'precision': float(metrics['precision']),
+        'recall': float(metrics['recall']),
+        'specificity': float(metrics['specificity']),
+        'f_score': float(metrics['f_score']),
         'per_class_accuracy': per_class_acc,
         'confusion_matrix': cm.tolist(),
         'class_distribution': np.bincount(all_labels, minlength=4).tolist()
@@ -109,6 +115,7 @@ def evaluate_conditional_head(
     device: torch.device,
     head_name: str,
     action_type_filter: int,
+    num_classes: int,
     enable_masking: bool = True
 ) -> Dict:
     """
@@ -120,10 +127,11 @@ def evaluate_conditional_head(
         device: Device
         head_name: Name of the head to evaluate
         action_type_filter: Which action type this head applies to
+        num_classes: Number of classes for this head
         enable_masking: If False, skip masking during evaluation (default: True)
 
     Returns:
-        Dict containing accuracy and sample frequency
+        Dict containing comprehensive metrics and sample frequency
     """
     model.eval()
 
@@ -155,6 +163,10 @@ def evaluate_conditional_head(
     if not all_preds:
         return {
             'accuracy': 0.0,
+            'precision': 0.0,
+            'recall': 0.0,
+            'specificity': 0.0,
+            'f_score': 0.0,
             'num_samples': 0,
             'frequency': 0.0
         }
@@ -162,10 +174,94 @@ def evaluate_conditional_head(
     all_preds = np.concatenate(all_preds)
     all_labels = np.concatenate(all_labels)
 
-    accuracy = compute_accuracy(all_preds, all_labels)
+    # Compute comprehensive metrics
+    metrics = compute_classification_metrics(all_preds, all_labels, num_classes=num_classes)
 
     return {
-        'accuracy': float(accuracy),
+        'accuracy': float(metrics['accuracy']),
+        'precision': float(metrics['precision']),
+        'recall': float(metrics['recall']),
+        'specificity': float(metrics['specificity']),
+        'f_score': float(metrics['f_score']),
+        'num_samples': len(all_labels),
+        'frequency': len(all_labels) / len(dataloader.dataset)
+    }
+
+
+def evaluate_gems_removed_head(
+    model: nn.Module,
+    dataloader: torch.utils.data.DataLoader,
+    device: torch.device,
+    num_classes: int,
+    enable_masking: bool = True
+) -> Dict:
+    """
+    Evaluate gems_removed head across ALL action types.
+
+    Unlike other conditional heads, gems_removed can apply to any action type
+    when the player has > 10 tokens after taking an action. This function
+    evaluates only samples where gem removal was actually required (label != 0).
+
+    Args:
+        model: Trained model
+        dataloader: Data loader
+        device: Device
+        num_classes: Number of gem removal classes
+        enable_masking: If False, skip masking during evaluation (default: True)
+
+    Returns:
+        Dict containing comprehensive metrics, sample count, and frequency
+    """
+    model.eval()
+
+    all_preds = []
+    all_labels = []
+
+    with torch.no_grad():
+        for states, labels, legal_masks in tqdm(dataloader, desc='Evaluating gems_removed'):
+            states = states.to(device)
+            legal_masks = {k: v.to(device) for k, v in legal_masks.items()}
+            outputs = model(states)
+
+            # Filter for samples where gems_removed is needed (label != 0)
+            # Note: 0 means "no removal needed", not "invalid" like -1 in other heads
+            gems_removed_labels = labels['gems_removed'].cpu().numpy()
+            mask = gems_removed_labels != 0
+
+            if mask.any():
+                # Apply legal action mask to enforce only legal token removals
+                gems_removed_logits = apply_legal_action_mask(
+                    outputs['gems_removed'],
+                    legal_masks['gems_removed'],
+                    enable_masking
+                )
+                preds = gems_removed_logits.argmax(dim=1).cpu().numpy()
+                all_preds.append(preds[mask])
+                all_labels.append(gems_removed_labels[mask])
+
+    if not all_preds:
+        return {
+            'accuracy': 0.0,
+            'precision': 0.0,
+            'recall': 0.0,
+            'specificity': 0.0,
+            'f_score': 0.0,
+            'num_samples': 0,
+            'frequency': 0.0
+        }
+
+    all_preds = np.concatenate(all_preds)
+    all_labels = np.concatenate(all_labels)
+
+    # Compute comprehensive metrics
+    metrics = compute_classification_metrics(all_preds, all_labels, num_classes=num_classes)
+
+    return {
+        'accuracy': float(metrics['accuracy']),
+        'precision': float(metrics['precision']),
+        'recall': float(metrics['recall']),
+        'specificity': float(metrics['specificity']),
+        'f_score': float(metrics['f_score']),
         'num_samples': len(all_labels),
         'frequency': len(all_labels) / len(dataloader.dataset)
     }
@@ -358,7 +454,7 @@ def main():
     model = MultiHeadSplendorNet(config['model'])
     model.to(device)
 
-    checkpoint = torch.load(args.checkpoint, map_location=device)
+    checkpoint = torch.load(args.checkpoint, map_location=device, weights_only=False)
     model.load_state_dict(checkpoint['model_state_dict'])
     print(f"Loaded checkpoint from {args.checkpoint}")
     print(f"Checkpoint epoch: {checkpoint['epoch']}")
@@ -376,40 +472,41 @@ def main():
     print("\nEvaluating conditional heads...")
     results = {'action_type': action_type_results}
 
-    # Card selection (BUILD)
-    card_sel_results = evaluate_conditional_head(model, dataloader, device, 'card_selection', 0)
+    # Card selection (BUILD) - 15 classes
+    card_sel_results = evaluate_conditional_head(model, dataloader, device, 'card_selection', 0, num_classes=15)
     results['card_selection'] = card_sel_results
-    print(f"  card_selection: acc={card_sel_results['accuracy']:.4f}, "
+    print(f"  card_selection: acc={card_sel_results['accuracy']:.4f}, f-score={card_sel_results['f_score']:.4f}, "
           f"samples={card_sel_results['num_samples']}")
 
-    # Card reservation (RESERVE)
-    card_res_results = evaluate_conditional_head(model, dataloader, device, 'card_reservation', 1)
+    # Card reservation (RESERVE) - 15 classes
+    card_res_results = evaluate_conditional_head(model, dataloader, device, 'card_reservation', 1, num_classes=15)
     results['card_reservation'] = card_res_results
-    print(f"  card_reservation: acc={card_res_results['accuracy']:.4f}, "
+    print(f"  card_reservation: acc={card_res_results['accuracy']:.4f}, f-score={card_res_results['f_score']:.4f}, "
           f"samples={card_res_results['num_samples']}")
 
-    # Gem take3 (TAKE3)
-    gem3_results = evaluate_conditional_head(model, dataloader, device, 'gem_take3', 3)
+    # Gem take3 (TAKE3) - 26 classes
+    gem3_results = evaluate_conditional_head(model, dataloader, device, 'gem_take3', 3, num_classes=26)
     results['gem_take3'] = gem3_results
-    print(f"  gem_take3: acc={gem3_results['accuracy']:.4f}, "
+    print(f"  gem_take3: acc={gem3_results['accuracy']:.4f}, f-score={gem3_results['f_score']:.4f}, "
           f"samples={gem3_results['num_samples']}")
 
-    # Gem take2 (TAKE2)
-    gem2_results = evaluate_conditional_head(model, dataloader, device, 'gem_take2', 2)
+    # Gem take2 (TAKE2) - 5 classes
+    gem2_results = evaluate_conditional_head(model, dataloader, device, 'gem_take2', 2, num_classes=5)
     results['gem_take2'] = gem2_results
-    print(f"  gem_take2: acc={gem2_results['accuracy']:.4f}, "
+    print(f"  gem_take2: acc={gem2_results['accuracy']:.4f}, f-score={gem2_results['f_score']:.4f}, "
           f"samples={gem2_results['num_samples']}")
 
-    # Noble (BUILD with noble available)
-    noble_results = evaluate_conditional_head(model, dataloader, device, 'noble', 0)
+    # Noble (BUILD with noble available) - 5 classes
+    noble_results = evaluate_conditional_head(model, dataloader, device, 'noble', 0, num_classes=5)
     results['noble'] = noble_results
-    print(f"  noble: acc={noble_results['accuracy']:.4f}, "
+    print(f"  noble: acc={noble_results['accuracy']:.4f}, f-score={noble_results['f_score']:.4f}, "
           f"samples={noble_results['num_samples']}")
 
-    # Gems removed (overflow)
-    gems_rem_results = {'accuracy': 0.0, 'num_samples': 0}  # Placeholder
+    # Gems removed (overflow) - 84 classes (from constants)
+    from .constants import NUM_GEM_REMOVAL_CLASSES
+    gems_rem_results = evaluate_gems_removed_head(model, dataloader, device, num_classes=NUM_GEM_REMOVAL_CLASSES)
     results['gems_removed'] = gems_rem_results
-    print(f"  gems_removed: acc={gems_rem_results['accuracy']:.4f}, "
+    print(f"  gems_removed: acc={gems_rem_results['accuracy']:.4f}, f-score={gems_rem_results['f_score']:.4f}, "
           f"samples={gems_rem_results['num_samples']}")
 
     # Overall action accuracy
@@ -441,7 +538,7 @@ def main():
     plot_confusion_matrix(cm, ['BUILD', 'RESERVE', 'TAKE2', 'TAKE3'], cm_path)
     print(f"  Saved confusion matrix to {cm_path}")
 
-    # Per-head accuracies
+    # Per-head accuracies (legacy plot)
     acc_dict = {
         'action_type': action_type_results['overall_accuracy'],
         'card_selection': card_sel_results['accuracy'],
@@ -454,6 +551,62 @@ def main():
     acc_path = os.path.join(results_dir, f'per_head_accuracies_{args.split}.png')
     plot_per_class_accuracy(acc_dict, acc_path)
     print(f"  Saved per-head accuracies to {acc_path}")
+
+    # Comprehensive metrics plot (NEW)
+    metrics_dict = {
+        'action_type': {
+            'accuracy': action_type_results['overall_accuracy'],
+            'precision': action_type_results['precision'],
+            'recall': action_type_results['recall'],
+            'specificity': action_type_results['specificity'],
+            'f_score': action_type_results['f_score']
+        },
+        'card_selection': {
+            'accuracy': card_sel_results['accuracy'],
+            'precision': card_sel_results['precision'],
+            'recall': card_sel_results['recall'],
+            'specificity': card_sel_results['specificity'],
+            'f_score': card_sel_results['f_score']
+        },
+        'card_reservation': {
+            'accuracy': card_res_results['accuracy'],
+            'precision': card_res_results['precision'],
+            'recall': card_res_results['recall'],
+            'specificity': card_res_results['specificity'],
+            'f_score': card_res_results['f_score']
+        },
+        'gem_take3': {
+            'accuracy': gem3_results['accuracy'],
+            'precision': gem3_results['precision'],
+            'recall': gem3_results['recall'],
+            'specificity': gem3_results['specificity'],
+            'f_score': gem3_results['f_score']
+        },
+        'gem_take2': {
+            'accuracy': gem2_results['accuracy'],
+            'precision': gem2_results['precision'],
+            'recall': gem2_results['recall'],
+            'specificity': gem2_results['specificity'],
+            'f_score': gem2_results['f_score']
+        },
+        'noble': {
+            'accuracy': noble_results['accuracy'],
+            'precision': noble_results['precision'],
+            'recall': noble_results['recall'],
+            'specificity': noble_results['specificity'],
+            'f_score': noble_results['f_score']
+        },
+        'gems_removed': {
+            'accuracy': gems_rem_results['accuracy'],
+            'precision': gems_rem_results['precision'],
+            'recall': gems_rem_results['recall'],
+            'specificity': gems_rem_results['specificity'],
+            'f_score': gems_rem_results['f_score']
+        }
+    }
+    metrics_path = os.path.join(results_dir, f'classification_metrics_{args.split}.png')
+    plot_classification_metrics(metrics_dict, metrics_path)
+    print(f"  Saved classification metrics to {metrics_path}")
 
     # Print summary
     print(f"\n{'='*60}")

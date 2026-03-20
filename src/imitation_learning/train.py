@@ -612,7 +612,8 @@ def load_checkpoint(
     checkpoint_path: str
 ) -> Tuple[int, float, Dict[str, float]]:
     """Load model checkpoint."""
-    checkpoint = torch.load(checkpoint_path)
+    # weights_only=False is needed to load optimizer state and numpy objects in checkpoints
+    checkpoint = torch.load(checkpoint_path, weights_only=False)
     model.load_state_dict(checkpoint['model_state_dict'])
     optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
     return checkpoint['epoch'], checkpoint['val_loss'], checkpoint['val_acc']

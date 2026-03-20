@@ -28,7 +28,7 @@
                 "--model",
                 "data/models/202511241159_config_tuning/best_model.pth",
                 "--games",
-                "1",
+                "10",
                 "--display"
             ],
             "console": "integratedTerminal",

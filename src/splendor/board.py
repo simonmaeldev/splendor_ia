@@ -176,6 +176,7 @@ class Board:
                 #print(tokensGiveAway)
                 #print(tokensPlayerAfter)
                 #raise Exception("stop")
+            # BUG when a player bought a card previous turn and became eligible for 2 or more nobles, he should be able to check if he can get nobles. And this for each action type
             moves += [Move(TOKENS, comb, tga, None) for tga in tokensGiveAway] if tokensGiveAway else [Move(TOKENS, comb, NO_TOKENS, None)]
         return moves
 

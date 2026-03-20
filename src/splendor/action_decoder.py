@@ -38,7 +38,7 @@ if TYPE_CHECKING:
     from .cards import Card
     from .characters import Character
 
-from .constants import BUILD, RESERVE, TOKENS, WHITE, BLUE, GREEN, RED, BLACK, NO_TOKENS, MAX_NB_TOKENS
+from .constants import BUILD, RESERVE, TOKENS, WHITE, BLUE, GREEN, RED, BLACK, NO_TOKENS, MAX_NB_TOKENS, GOLD, TAKEONEGOLD
 from .custom_operators import add, substract
 from .move import Move
 
@@ -160,12 +160,8 @@ def decode_card_selection(class_idx: int, board: 'Board') -> Optional['Card']:
     current_player = board.players[board.currentPlayer]
 
     if 0 <= class_idx < 12:
-        # Visible cards: indices 0-11 map to 3 levels × 4 cards
-        level = class_idx // 4  # 0-3 → level 0, 4-7 → level 1, 8-11 → level 2
-        card_in_level = class_idx % 4
-
-        if level < len(board.displayedCards) and card_in_level < len(board.displayedCards[level]):
-            return board.displayedCards[level][card_in_level]
+        flat_displayed_cards = [card for lvl in board.displayedCards for card in lvl]
+        return flat_displayed_cards[class_idx]
 
     elif 12 <= class_idx < 15:
         # Reserved cards: indices 12-14
@@ -331,54 +327,75 @@ def decode_predictions_to_move(predictions: Dict[str, int], board: 'Board') -> M
         - For RESERVE: uses card_reservation, gems_removed
         - For TAKE2/TAKE3: uses gem_take2/gem_take3, gems_removed
         - If predictions are invalid, returns a safe fallback move
+        - Logic follows board.py:doMove structure: main action → token removal → noble selection
     """
     action_type = predictions.get('action_type', 0)
 
-    # Decode action based on type
+    # Create a deep copy for simulation without side effects
+    board_copy = board.clone()
+
+    # Decode action based on type and simulate on board copy
     if action_type == BUILD:  # BUILD
         card = decode_card_selection(predictions.get('card_selection', 0), board)
-        noble = decode_noble_selection(predictions.get('noble', 0), board)
-        tokens_to_remove = decode_gems_removed(predictions.get('gems_removed', 0))
-
-        # Fallback if card is None
         if card is None:
             raise ValueError("trying to build a None card")
 
-        return Move(BUILD, card, tokens_to_remove, noble)
+        # Simulate BUILD action on copy
+        board_copy.build(Move(BUILD, card, NO_TOKENS, None))
+        action = card
+        final_action_type = BUILD
 
     elif action_type == RESERVE:  # RESERVE
         card_or_level = decode_card_reservation(predictions.get('card_reservation', 0), board)
-        tokens_to_remove = decode_gems_removed(predictions.get('gems_removed', 0))
 
         # Fallback if invalid
         if card_or_level is None:
-            # Default to first visible card
             if len(board.displayedCards[0]) > 0:
                 card_or_level = board.displayedCards[0][0]
 
-        return Move(RESERVE, card_or_level, tokens_to_remove, None)
+        # Simulate RESERVE action on copy
+        board_copy.reserve(Move(RESERVE, card_or_level, NO_TOKENS, None))
+        action = card_or_level
+        final_action_type = RESERVE
 
     elif action_type == 2:  # TAKE2
         tokens = decode_gem_take2(predictions.get('gem_take2', 0))
-        tokens_to_remove = decode_gems_removed(predictions.get('gems_removed', 0))
 
-        # Validate token removal after taking tokens
-        current_player = board.players[board.currentPlayer]
-        tokens_after_taking = add(current_player.tokens, tokens)
-        tokens_to_remove = validate_token_removal(tokens_after_taking, tokens_to_remove)
-
-        return Move(TOKENS, tokens, tokens_to_remove, None)
+        # Simulate TAKE2 action on copy
+        board_copy.takeTokens(Move(TOKENS, tokens, NO_TOKENS, None))
+        action = tokens
+        final_action_type = TOKENS
 
     else:  # TAKE3 (action_type == 3)
         tokens = decode_gem_take3(predictions.get('gem_take3', 0))
-        tokens_to_remove = decode_gems_removed(predictions.get('gems_removed', 0))
 
-        # Validate token removal after taking tokens
-        current_player = board.players[board.currentPlayer]
-        tokens_after_taking = add(current_player.tokens, tokens)
-        tokens_to_remove = validate_token_removal(tokens_after_taking, tokens_to_remove)
+        # Simulate TAKE3 action on copy
+        board_copy.takeTokens(Move(TOKENS, tokens, NO_TOKENS, None))
+        action = tokens
+        final_action_type = TOKENS
 
-        return Move(TOKENS, tokens, tokens_to_remove, None)
+    # Common logic: Get player state after the action
+    current_player_copy = board_copy.getCurrentPlayer()
+    tokens_after_action = current_player_copy.tokens
+    bonus_after_action = current_player_copy.getTotalBonus()
+
+    # Common logic: Check if token removal is needed (sum > 10)
+    tokens_to_remove = decode_gems_removed(predictions.get('gems_removed', 0))
+    if sum(tokens_after_action) > MAX_NB_TOKENS:
+        tokens_to_remove = validate_token_removal(tokens_after_action, tokens_to_remove)
+    else:
+        tokens_to_remove = NO_TOKENS
+
+    # Common logic: Check for available nobles based on post-action bonus
+    possible_nobles = list(filter(
+        lambda c: all(color >= 0 for color in substract(bonus_after_action, c.cost)),
+        board_copy.characters
+    ))
+    noble = None
+    if possible_nobles:
+        noble = decode_noble_selection(predictions.get('noble', 0), board)
+
+    return Move(final_action_type, action, tokens_to_remove, noble)
 
 
 if __name__ == "__main__":
